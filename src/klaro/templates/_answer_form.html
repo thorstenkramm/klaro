@@ -1,0 +1,34 @@
+{% if errors %}
+<div class="uk-alert-danger kl-alert" role="alert" uk-alert>
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5"></path><path d="M12 16.5v.01"></path></svg>
+  <p>Please correct the highlighted answers and submit again.</p>
+</div>
+{% endif %}
+<form method="post" action="{{ request.path }}" hx-post="{{ request.path }}" hx-target="#questionnaire-response" hx-swap="outerHTML" data-kl-form>
+  {% for question in record.questions %}
+  {% set question_errors = errors.get(question.id, []) %}
+  <fieldset class="uk-fieldset kl-question{% if question_errors %} kl-question--error{% endif %}" aria-required="true"{% if question_errors %} aria-describedby="{{ question.id }}-hint {{ question.id }}-error"{% else %} aria-describedby="{{ question.id }}-hint"{% endif %}>
+    <legend class="uk-legend">{{ loop.index }}. {{ question.name }}</legend>
+    <p class="kl-hint" id="{{ question.id }}-hint">{{ "Select one answer." if question.kind == "radio" else "Select at least one answer." }}</p>
+    {% for option in question.answers %}
+    {% set option_id = question.id ~ "-option-" ~ loop.index %}
+    <label class="kl-option" for="{{ option_id }}">
+      <span>{{ option }}</span>
+      <input class="{{ "uk-radio" if question.kind == "radio" else "uk-checkbox" }}" id="{{ option_id }}" name="{{ question.id }}" type="{{ question.kind }}" value="{{ option }}"{% if question.kind == "radio" %} required{% endif %}{% if option in selected.get(question.id, []) %} checked{% endif %}{% if question_errors %} aria-invalid="true"{% endif %}>
+    </label>
+    {% endfor %}
+    {% if question_errors %}
+    <ul class="kl-error" id="{{ question.id }}-error" role="alert">
+      {% for message in question_errors %}<li>{{ message }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </fieldset>
+  {% endfor %}
+  <div class="kl-actions">
+    <button class="uk-button uk-button-primary uk-width-1-1 kl-submit" type="submit">Send answers</button>
+    <p class="kl-note">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+      You can’t change your answers after sending.
+    </p>
+  </div>
+</form>

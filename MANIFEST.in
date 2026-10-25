@@ -1,0 +1,7 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include uv.lock
+include src/klaro/THIRD_PARTY_NOTICES.md
+recursive-include src/klaro/templates *.html
+recursive-include src/klaro/static *
