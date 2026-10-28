@@ -1,0 +1,33 @@
+# Trivy licence compliance for what Klaro ships: the built wheel (including the vendored
+# UIkit CSS and htmx) plus its locked runtime dependencies, installed into a clean virtual
+# environment. Lockfiles carry no licence data, so the installed packages are scanned:
+#
+#   trivy rootfs --config trivy-license.yaml <virtual environment>
+#
+# The scan fails on forbidden or restricted licences (CRITICAL, HIGH) and on licences Trivy
+# cannot classify (UNKNOWN); a new licence therefore needs a deliberate decision below.
+# Reciprocal (MEDIUM, e.g. certifi's MPL-2.0) and permissive (LOW) licences pass.
+
+scan:
+  scanners:
+    - license
+
+license:
+  # Also detect licence texts in individual files, e.g. vendored assets and bundled notices.
+  full: true
+  # Licences Trivy cannot classify by these names; all are permissive. They go into the
+  # `permissive` category because it is empty by default: setting `notice` or `unencumbered`
+  # would replace Trivy's built-in lists (MIT, Apache-2.0, BSD, ...) instead of extending them.
+  permissive:
+    # htmx is distributed under 0BSD, which Trivy reports under this alias.
+    - BSD-0-Clause
+    # greenlet: MIT plus the Python Software Foundation License 2.0.
+    - PSF-2.0
+    - MIT AND PSF-2.0
+
+severity:
+  - UNKNOWN
+  - HIGH
+  - CRITICAL
+
+exit-code: 1

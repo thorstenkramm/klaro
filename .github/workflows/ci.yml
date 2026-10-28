@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, so newly published vulnerabilities in unchanged dependencies are found too.
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      mutation:
+        description: Run mutation testing on the core modules (slow; once per release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check src tests
+      - name: Format
+        run: uv run ruff format --check src tests
+      - name: Flake8 (pycodestyle, pyflakes, mccabe; settings in .flake8)
+        run: uv run flake8
+      - name: Type check
+        run: uv run mypy
+      - name: Install Chromium for browser tests
+        run: uv run playwright install --with-deps chromium
+      - name: Tests with branch coverage floor
+        run: uv run pytest --cov --cov-report=term
+
+  quality:
+    name: Duplication, specifications, and dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+      - name: JavaScript lint (eslint.config.js)
+        run: |
+          npm ci
+          npm run lint:js
+      - name: Code duplication (threshold in .jscpd.json)
+        run: npx --yes jscpd@5.4.2
+      - name: OpenSpec validation
+        run: npx --yes @fission-ai/openspec@1.14.3 validate --all --strict
+      - name: Dependency vulnerability audit
+        run: |
+          uv export --format requirements-txt --no-dev --no-emit-project --locked -o requirements-audit.txt
+          uvx pip-audit==2.10.1 --strict --disable-pip --progress-spinner off -r requirements-audit.txt
+
+  security:
+    name: Trivy (vulnerabilities, secrets, misconfiguration)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned to the commit of v0.36.0: trivy-action tags were compromised in March 2026.
+      - name: Trivy gate (fixable HIGH/CRITICAL vulnerabilities and secrets; trivy.yaml)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: trivy.yaml
+          version: v0.76.1
+      - name: Trivy report for GitHub code scanning (all severities, including unfixed)
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # Environment variables take precedence over trivy.yaml.
+          TRIVY_SEVERITY: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          TRIVY_IGNORE_UNFIXED: "false"
+        with:
+          scan-type: fs
+          scan-ref: .
+          trivy-config: trivy.yaml
+          version: v0.76.1
+          skip-setup-trivy: true
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+      - name: Upload Trivy report to GitHub code scanning
+        # Pull requests from forks cannot write security events.
+        if: >-
+          always() && hashFiles('trivy-results.sarif') != '' &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
+  licenses:
+    name: Licence compliance of the shipped package (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      # Lockfiles carry no licence data, so scan what users actually install: the wheel
+      # (with vendored UIkit CSS and htmx) plus the locked runtime dependencies.
+      - name: Install the built wheel and its locked runtime dependencies
+        run: |
+          uv build --wheel --out-dir license-scan/dist
+          uv export --format requirements-txt --no-dev --no-emit-project --locked \
+            -o license-scan/requirements.txt
+          uv venv license-scan/venv
+          uv pip install --python license-scan/venv/bin/python \
+            -r license-scan/requirements.txt license-scan/dist/*.whl
+      - name: Trivy licence gate (forbidden, restricted, or unknown; trivy-license.yaml)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: rootfs
+          scan-ref: license-scan/venv
+          trivy-config: trivy-license.yaml
+          version: v0.76.1
+
+  workflows:
+    name: Workflow lint (actionlint, zizmor, Dependabot schema)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - name: actionlint (syntax, expressions, shellcheck of run steps)
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color
+      - name: zizmor (workflow and Dependabot security audit)
+        # The read-only job token enables online audits, e.g. impostor commits behind SHA pins.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: uvx zizmor==1.31.1 --format github .github
+      - name: Dependabot configuration schema
+        run: uvx check-jsonschema==0.39.0 --builtin-schema vendor.dependabot .github/dependabot.yml
+
+  mutation:
+    name: Mutation testing (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Mutate answers, models, records, and markdown ([tool.mutmut] in pyproject.toml)
+        run: uv run mutmut run
+      - name: Report surviving mutants
+        if: always()
+        run: uv run mutmut results

@@ -1,0 +1,43 @@
+# Trivy configuration shared by local runs and CI.
+#
+#   trivy fs --config trivy.yaml .
+#
+# It scans the dependency lockfiles (uv.lock, package-lock.json), every file for leaked
+# secrets, and configuration files for misconfigurations. CI fails on fixable HIGH or
+# CRITICAL vulnerabilities and on HIGH or CRITICAL secrets; a separate, non-blocking report
+# with all severities goes to GitHub code scanning.
+
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+  # Generated, cached, or vendored trees that are not part of the source.
+  skip-dirs:
+    - .venv
+    - node_modules
+    - mutants
+    - build
+    - dist
+    - tmp
+    - .hypothesis
+    - .pytest_cache
+    - .ruff_cache
+    - .mypy_cache
+    # Created by the CI licence job (wheel install); scanned separately there.
+    - license-scan
+
+pkg:
+  # Development tools (pytest, Playwright, ESLint, ...) run in CI with repository access,
+  # so their vulnerabilities matter as well.
+  include-dev-deps: true
+
+vulnerability:
+  # Only gate on problems that can be fixed by upgrading; unfixed ones appear in the report.
+  ignore-unfixed: true
+
+severity:
+  - HIGH
+  - CRITICAL
+
+exit-code: 1

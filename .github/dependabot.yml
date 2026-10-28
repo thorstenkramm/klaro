@@ -1,0 +1,66 @@
+# Dependabot keeps the locked dependencies and the SHA-pinned GitHub Actions current.
+#
+# - Weekly, grouped pull requests: routine minor and patch updates arrive together per
+#   ecosystem; major updates stay separate because they are the ones that can break things.
+# - A seven-day cooldown on version updates: malicious or broken releases are usually
+#   yanked within days. Security updates ignore the cooldown and arrive immediately.
+# - CI (.github/workflows/ci.yml) runs every check on each pull request before merge.
+
+version: 2
+
+updates:
+  # Python: uv.lock (runtime and development dependency groups from pyproject.toml).
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+    groups:
+      python-runtime:
+        dependency-type: production
+        update-types: [minor, patch]
+      python-development:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Node: package-lock.json (ESLint tooling only; nothing ships to users).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps-dev
+    groups:
+      node-tooling:
+        update-types: [minor, patch]
+
+  # GitHub Actions: updates the pinned commit SHAs together with their version comments.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        update-types: [minor, patch]
