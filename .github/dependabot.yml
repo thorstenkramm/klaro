@@ -45,6 +45,9 @@ updates:
     commit-message:
       prefix: deps-dev
     groups:
+      # eslint and @eslint/js must share a major version; update them together, majors included.
+      eslint:
+        patterns: ["eslint", "@eslint/*"]
       node-tooling:
         update-types: [minor, patch]
 
