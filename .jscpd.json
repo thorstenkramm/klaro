@@ -1,0 +1,15 @@
+{
+  "path": ["src", "tests"],
+  "minLines": 5,
+  "minTokens": 50,
+  "threshold": 3,
+  "reporters": ["console"],
+  "ignore": [
+    "**/vendor/**",
+    "**/licenses/**",
+    "**/__pycache__/**",
+    "**/*.min.*"
+  ],
+  "gitignore": true,
+  "absolute": false
+}

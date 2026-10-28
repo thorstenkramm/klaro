@@ -1,0 +1,13 @@
+{
+  "name": "klaro-frontend-tooling",
+  "private": true,
+  "description": "Lint tooling for Klaro's progressive-enhancement script; not a runtime dependency.",
+  "type": "module",
+  "scripts": {
+    "lint:js": "eslint src/klaro/static/klaro"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5"
+  }
+}

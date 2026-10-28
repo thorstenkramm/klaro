@@ -1,0 +1,45 @@
+# Flake8 configuration for Klaro.
+#
+# Ruff ([tool.ruff] in pyproject.toml) is the primary linter. Flake8 runs as an independent
+# second opinion with the reference implementations of pycodestyle (E/W), pyflakes (F), and
+# mccabe (C90). Flake8 cannot read pyproject.toml, so its settings live in this file.
+#
+# Run from the repository root:  uv run flake8
+# Flake8 does not support comments after values, so every setting is explained above it.
+
+[flake8]
+# Same limit as Ruff and its formatter, for code and for comments/docstrings (W505).
+max-line-length = 100
+max-doc-length = 100
+
+# McCabe cyclomatic complexity per function (C901). 10 is mccabe's recommended ceiling;
+# split a function rather than raising this value.
+max-complexity = 10
+
+# Keep flake8's default ignore list (E121, E123, E126, E226, E24, E704, W503, W504), which
+# already covers the formatter's line-break and stub styles, and additionally ignore:
+#   E203  whitespace before ':' - the formatter writes complex slices as `items[start : end]`.
+extend-ignore = E203
+
+# Never lint generated, vendored, cached, or non-project trees. The defaults (.git,
+# __pycache__, .tox, .nox, .eggs, *.egg, ...) stay excluded as well.
+extend-exclude =
+    .venv,
+    build,
+    dist,
+    mutants,
+    node_modules,
+    .hypothesis,
+    .pytest_cache,
+    .ruff_cache,
+    .mypy_cache,
+    src/klaro.egg-info,
+    openspec,
+    tmp
+
+# Tests, like the application, follow every rule; no per-file exceptions are needed.
+
+# Readable output: the offending source line, a per-code summary, and the total count.
+show-source = true
+statistics = true
+count = true
