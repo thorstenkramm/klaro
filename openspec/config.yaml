@@ -1,5 +1,18 @@
 schema: spec-driven
 
+context: |
+  Klaro's authentication is intentionally weak: the secret capability URL is the only credential and
+  X-Questioner is an unauthenticated label. Never propose accounts, logins, or per-user credentials.
+  Exactly one instance with one gevent worker; Klaro is served from the root of its own host name;
+  answer submission is browser-only. Native forms must work without JavaScript, with a same-origin CSP
+  and no JavaScript build step or CDN.
+  Every design must state, for anonymous requests, what they can allocate or compute on the single
+  worker and how it is bounded, and must keep client input from producing a 500.
+  Size and count limits live only in src/klaro/limits.py. Storage format changes need a new schema
+  version and a fresh data directory; there is no migration.
+  Every spec scenario needs executable tests listed in tests/scenario-coverage.md; tasks include
+  accessibility (WCAG 2.2 AA, axe tests), README updates, and the full gate list in AGENTS.md.
+
 # Project context (optional)
 # Add only constraints that should guide OpenSpec artifacts and workflows.
 # Include constraints an agent cannot infer by reading the code.
