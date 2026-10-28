@@ -5,10 +5,11 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from klaro.storage import FileStore, Questionnaire, QuestionnaireNotFound
+from klaro.filestore import FileStore, QuestionnaireNotFound
+from klaro.records import Questionnaire, Status, is_token
 
 
-@dataclass
+@dataclass(slots=True)
 class _HubEntry:
     condition: threading.Condition
     version: int = 0
@@ -40,7 +41,7 @@ class Subscription:
             if self.store.clock.wall() >= self.expires_at:
                 return "expired", None
             raise
-        if record.status == "answered":
+        if record.status is Status.ANSWERED:
             return "answer", record
         return "status", record
 
@@ -69,36 +70,53 @@ class Subscription:
 
 
 class SubscriberHub:
+    """Per-token wake-up conditions that exist only while a stream holds them."""
+
     def __init__(self, store: FileStore) -> None:
         self.store = store
         self._entries: dict[str, _HubEntry] = {}
         self._guard = threading.Lock()
         store.add_transition_listener(self.notify)
 
-    def _entry(self, token: str) -> _HubEntry:
+    def _acquire(self, token: str) -> _HubEntry:
         with self._guard:
-            return self._entries.setdefault(token, _HubEntry(threading.Condition()))
+            entry = self._entries.get(token)
+            if entry is None:
+                entry = self._entries[token] = _HubEntry(threading.Condition())
+            entry.subscribers += 1
+            return entry
+
+    def _release(self, token: str, entry: _HubEntry) -> None:
+        with self._guard:
+            entry.subscribers -= 1
+            if entry.subscribers == 0 and self._entries.get(token) is entry:
+                del self._entries[token]
 
     def register(self, token: str) -> Subscription:
-        """Register and recheck while holding the same locks used by transitions."""
-        entry = self._entry(token)
-        with self.store.locked(token):
-            with entry.condition:
-                entry.subscribers += 1
-                try:
-                    initial = self.store.get_public(token)
-                except Exception:
-                    entry.subscribers -= 1
-                    raise
+        """Register and recheck while holding the same lock used by transitions.
+
+        The entry is published before the state is read under the store lock, so a
+        transition committed afterwards always finds and wakes it.
+        """
+        if not is_token(token):
+            raise QuestionnaireNotFound
+        entry = self._acquire(token)
+        try:
+            with self.store.locked(token), entry.condition:
+                initial = self.store.get_public(token)
                 return Subscription(self, token, entry, initial)
+        except BaseException:
+            self._release(token, entry)
+            raise
 
     def notify(self, token: str, _event: str) -> None:
-        entry = self._entry(token)
+        with self._guard:
+            entry = self._entries.get(token)
+        if entry is None:
+            return
         with entry.condition:
             entry.version += 1
             entry.condition.notify_all()
 
     def _unsubscribe(self, token: str, entry: _HubEntry) -> None:
-        # Entries remain allocated so a concurrent register/close cannot lose a version.
-        with entry.condition:
-            entry.subscribers = max(0, entry.subscribers - 1)
+        self._release(token, entry)

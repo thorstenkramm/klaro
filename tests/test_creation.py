@@ -8,13 +8,13 @@ import pytest
 
 from klaro.config import Config, KlaroConfig, PushoverConfig
 from klaro.creation import QuestionnaireCreator
+from klaro.filestore import FileStore, QuestionnaireNotFound
 from klaro.models import Question
 from klaro.pushover import (
     PushoverClient,
     PushoverError,
     PushoverRecipientRejected,
 )
-from klaro.storage import FileStore, QuestionnaireNotFound
 from tests.helpers import FakeClock
 
 QUESTION = Question(id="q1", name="Drink?", kind="radio", answers=("beer", "water"))
@@ -66,7 +66,7 @@ def test_acceptance_publishes_previously_invisible_pending_record(tmp_path: Path
 
 
 @pytest.mark.parametrize(
-    "response,exception_type,http_status",
+    ("response", "exception_type", "http_status"),
     [
         (
             pushover_response(

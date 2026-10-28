@@ -9,6 +9,7 @@ from klaro.abuse import CreationAbuseControls
 from klaro.config import PushoverConfig
 from klaro.models import Question
 from klaro.pushover import PushoverClient, PushoverError, PushoverRecipientRejected
+from tests.app_helpers import make_app, post_creation
 from tests.helpers import FakeClock
 
 IP = "192.0.2.10"
@@ -31,6 +32,12 @@ def send(client: PushoverClient) -> None:
     client.send(recipient="u" * 30, questioner="Dinner mate", questions=[QUESTION], url=URL)
 
 
+def assert_no_backoff(app) -> None:
+    backoff = app.extensions["klaro"].abuse.recipient_backoff
+    assert backoff.check(IP).allowed
+    assert backoff._states == {}
+
+
 @pytest.mark.parametrize(
     "failure_response",
     [
@@ -43,34 +50,32 @@ def send(client: PushoverClient) -> None:
     ],
 )
 def test_excluded_pushover_response_failures_do_not_trigger_backoff(
-    fake_clock: FakeClock, failure_response: Mock
+    tmp_path, fake_clock: FakeClock, failure_response: Mock
 ) -> None:
-    transport = Mock(return_value=failure_response)
-    controls = CreationAbuseControls(fake_clock)
-    assert controls.check(IP).allowed
-
     with pytest.raises(PushoverError) as caught:
-        send(adapter(transport))
+        send(adapter(Mock(return_value=failure_response)))
     assert not isinstance(caught.value, PushoverRecipientRejected)
-    controls.record_other_failure(IP)
 
-    assert controls.recipient_backoff.check(IP).allowed
-    assert IP not in controls.recipient_backoff._states
+    transport = Mock(return_value=failure_response)
+    app, _ = make_app(tmp_path, fake_clock, transport=transport)
+    response = post_creation(app.test_client(), ip=IP)
+
+    assert response.status_code == 502
     assert transport.call_count == 1
+    assert_no_backoff(app)
 
 
 @pytest.mark.parametrize("failure", [requests.Timeout("late"), requests.ConnectionError("offline")])
-def test_network_failures_do_not_trigger_backoff(fake_clock: FakeClock, failure: Exception) -> None:
+def test_network_failures_do_not_trigger_backoff(
+    tmp_path, fake_clock: FakeClock, failure: Exception
+) -> None:
     transport = Mock(side_effect=failure)
-    controls = CreationAbuseControls(fake_clock)
-    assert controls.check(IP).allowed
+    app, _ = make_app(tmp_path, fake_clock, transport=transport)
 
-    with pytest.raises(PushoverError):
-        send(adapter(transport))
-    controls.record_other_failure(IP)
+    response = post_creation(app.test_client(), ip=IP)
 
-    assert controls.recipient_backoff.check(IP).allowed
-    assert IP not in controls.recipient_backoff._states
+    assert response.status_code == 502
+    assert_no_backoff(app)
 
 
 def test_structured_recipient_rejection_integrates_with_backoff(fake_clock: FakeClock) -> None:

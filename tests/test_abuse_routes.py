@@ -122,7 +122,7 @@ def test_exhausted_creation_quota_does_not_affect_answer_traffic(
     )
     answered = client.post(
         f"/{token}",
-        data={"q1": "beer", "q2": ["rice", "salad"]},
+        data={"q1": "1", "q2": ["1", "2"]},
         environ_base={"REMOTE_ADDR": IP},
     )
     polled = client.get(f"/{token}?answer_only=1", environ_base={"REMOTE_ADDR": IP})
@@ -130,13 +130,12 @@ def test_exhausted_creation_quota_does_not_affect_answer_traffic(
     deleted = client.get(f"/{token}", environ_base={"REMOTE_ADDR": IP})
 
     assert retrieved.status_code == 200
-    assert retrieved.json["status"] == "awaiting_answer"
+    assert retrieved.json["answered_at"] is None
     assert answered.status_code == 200
     assert polled.status_code == 200
-    assert polled.json == {
-        "status": "answered",
-        "answers": {"q1": ["beer"], "q2": ["rice", "salad"]},
-    }
+    from tests.response_helpers import expected_answers
+
+    assert polled.json == expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"])
     assert confirmed.status_code == 200
     assert deleted.status_code == 404
     assert deleted.json["error"]["code"] == "not_found"

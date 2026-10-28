@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import time
+import threading
 from pathlib import Path
 
 import pytest
 
+from klaro.answers import SubmittedAnswer
+from klaro.filestore import FileStore, QuestionnaireNotFound
 from klaro.models import Question
 from klaro.scheduler import CleanupScheduler
-from klaro.storage import FileStore, QuestionnaireNotFound
 from tests.helpers import FakeClock
+from tests.response_helpers import selected_by_id
 
 QUESTION = Question(id="q1", name="Drink?", kind="radio", answers=("beer", "water"))
 TOKENS = iter(["a" * 43, "b" * 43, "c" * 43])
@@ -28,7 +30,7 @@ def create(target: FileStore, *, status: str = "awaiting_answer", lifetime: int 
     if status != "pending":
         target.publish(record.token)
     if status == "answered":
-        target.submit_answers(record.token, {"q1": ["beer"]})
+        target.submit_answers(record.token, {"q1": SubmittedAnswer(("beer",))})
     return target.read(record.token)
 
 
@@ -69,7 +71,7 @@ def test_submission_and_publication_after_expiry_are_rejected(
     answered = create(active, lifetime=60)
     fake_clock.advance(60)
     with pytest.raises(QuestionnaireNotFound):
-        active.submit_answers(answered.token, {"q1": ["beer"]})
+        active.submit_answers(answered.token, {"q1": SubmittedAnswer(("beer",))})
 
     pending_clock = FakeClock()
     pending_store = make_store(tmp_path / "pending", pending_clock, iter(["f" * 43]))
@@ -108,7 +110,7 @@ def test_restart_recovers_state_and_removes_stale_pending(
     assert restarted.read(expired.token) is None
     recovered = restarted.read(surviving.token)
     assert recovered.status == "answered"
-    assert recovered.answer_dict() == {"q1": ["beer"]}
+    assert selected_by_id(recovered) == {"q1": ["beer"]}
     assert recovered.expires_at == original_expiry
 
 
@@ -117,6 +119,10 @@ def test_scheduler_cleans_without_access_and_starts_once(
 ) -> None:
     target = make_store(tmp_path, fake_clock, iter(["l" * 43]))
     record = create(target, lifetime=60)
+    expired = threading.Event()
+    target.add_transition_listener(
+        lambda token, event: event == "expired" and token == record.token and expired.set()
+    )
     scheduler = CleanupScheduler(target, interval_seconds=0.02)
     scheduler.start()
     first_thread = scheduler._thread
@@ -124,9 +130,7 @@ def test_scheduler_cleans_without_access_and_starts_once(
     fake_clock.advance(60)
     try:
         assert scheduler._thread is first_thread
-        deadline = time.monotonic() + 2
-        while target.read(record.token) is not None and time.monotonic() < deadline:
-            time.sleep(0.02)
+        assert expired.wait(timeout=2)
         assert target.read(record.token) is None
         assert scheduler.running
     finally:

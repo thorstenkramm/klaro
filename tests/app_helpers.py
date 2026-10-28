@@ -60,11 +60,13 @@ def make_app(
     return app, actual_transport
 
 
-def post_creation(client, *, body=None, questioner=QUESTIONER, recipient=RECIPIENT, ip=IP):
+def post_creation(
+    client, *, body=None, questioner=QUESTIONER, recipient=RECIPIENT, ip=IP, headers=None
+):
     return client.post(
         "/",
         data=json.dumps(VALID_BODY if body is None else body),
         content_type="application/json",
-        headers={"X-Pushover-User": recipient, "X-Questioner": questioner},
+        headers={"X-Pushover-User": recipient, "X-Questioner": questioner, **(headers or {})},
         environ_base={"REMOTE_ADDR": ip},
     )

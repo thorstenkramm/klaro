@@ -21,7 +21,7 @@ def test_valid_questions_receive_sequential_ids_and_preserve_options() -> None:
     raw = payload(
         [
             question(answers=[" beer ", "Beer"]),
-            question("checkbox", ["rice", "salad", "rice "]),
+            {**question("checkbox", ["rice", "salad", "rice "]), "name": "Sides?"},
         ]
     )
 
@@ -35,12 +35,16 @@ def test_valid_questions_receive_sequential_ids_and_preserve_options() -> None:
         "name": "What would you like?",
         "type": "radio",
         "answers": [" beer ", "Beer"],
+        "allow_other": False,
+        "allow_comments": False,
+        "recommendations": [],
     }
 
 
 @pytest.mark.parametrize("count", [1, 20])
 def test_question_count_boundaries(count: int) -> None:
-    assert len(validate_questionnaire(payload([question()] * count))) == count
+    items = [{**question(), "name": f"Question {index}"} for index in range(count)]
+    assert len(validate_questionnaire(payload(items))) == count
 
 
 @pytest.mark.parametrize("count", [0, 21])
@@ -76,7 +80,7 @@ def test_invalid_option_counts(count: int) -> None:
         validate_questionnaire(payload([question(answers=[str(i) for i in range(count)])]))
 
 
-@pytest.mark.parametrize("length", [1, 200])
+@pytest.mark.parametrize("length", [1, 2_000])
 def test_option_length_boundaries(length: int) -> None:
     option = "x" * length
     assert (
@@ -85,7 +89,7 @@ def test_option_length_boundaries(length: int) -> None:
     )
 
 
-@pytest.mark.parametrize("option", ["", " ", "x" * 201, 1, None, ["nested"]])
+@pytest.mark.parametrize("option", ["", " ", "x" * 2_001, 1, None, ["nested"]])
 def test_invalid_options(option: object) -> None:
     with pytest.raises(SchemaValidationError):
         validate_questionnaire(payload([question(answers=[option, "other"])]))
@@ -96,18 +100,58 @@ def test_exact_duplicate_options_are_rejected() -> None:
         validate_questionnaire(payload([question(answers=["same", "same"])]))
 
 
+def test_duplicate_question_names_are_rejected() -> None:
+    with pytest.raises(SchemaValidationError) as caught:
+        validate_questionnaire(payload([question(), question()]))
+    assert caught.value.fields == {"questions.1.name": ["Question names must be unique."]}
+
+
+def test_question_name_uniqueness_is_exact() -> None:
+    names = ["Drink?", "drink?", " Drink?", "Drink? "]
+    items = [{**question(), "name": name} for name in names]
+    assert [q.name for q in validate_questionnaire(payload(items))] == names
+
+
 @pytest.mark.parametrize("kind", ["text", "free-text", "Radio", "", None, 1])
 def test_unsupported_question_types(kind: object) -> None:
     with pytest.raises(SchemaValidationError, match="radio or checkbox"):
         validate_questionnaire(payload([question(kind=kind)]))
 
 
-@pytest.mark.parametrize("field", ["confirm_reception", "required", "unknown"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "confirm_reception",
+        "required",
+        "unknown",
+        "other",
+        "comment",
+    ],
+)
 def test_unknown_question_fields(field: str) -> None:
     item = question()
     item[field] = True
     with pytest.raises(SchemaValidationError, match="not supported"):
         validate_questionnaire(payload([item]))
+
+
+@pytest.mark.parametrize("flag", ["allow_other", "allow_comments"])
+@pytest.mark.parametrize("value", [None, 0, 1, "true", [], {}])
+def test_optional_text_flags_require_booleans(flag: str, value: object) -> None:
+    item = {**question(), flag: value}
+    with pytest.raises(SchemaValidationError) as caught:
+        validate_questionnaire(payload([item]))
+    assert caught.value.fields == {f"questions.0.{flag}": ["Must be a boolean."]}
+
+
+def test_optional_text_flags_accept_and_default_to_false() -> None:
+    enabled = validate_questionnaire(
+        payload([{**question(), "allow_other": True, "allow_comments": True}])
+    )[0]
+    assert enabled.allow_other is True
+    assert enabled.allow_comments is True
+    assert enabled.as_dict()["allow_other"] is True
+    assert enabled.as_dict()["allow_comments"] is True
 
 
 def test_unknown_top_level_field() -> None:

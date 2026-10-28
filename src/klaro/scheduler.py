@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from klaro.storage import FileStore
+from klaro.filestore import FileStore
 
 LOGGER = logging.getLogger(__name__)
 

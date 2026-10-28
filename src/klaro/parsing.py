@@ -10,7 +10,9 @@ import yaml
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
-MAX_BODY_BYTES = 65_536
+from klaro.limits import MAX_BODY_BYTES
+
+__all__ = ["MAX_BODY_BYTES", "ParseError", "parse_questionnaire_body"]
 
 
 class ParseError(ValueError):
@@ -68,13 +70,16 @@ _UniqueKeySafeLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_
 def _media_type(content_type: str) -> tuple[str, str | None]:
     message = Message()
     message["content-type"] = content_type
-    return message.get_content_type().lower(), message.get_param("charset", header="content-type")
+    charset = message.get_param("charset", header="content-type")
+    return message.get_content_type().lower(), charset if isinstance(charset, str) else None
 
 
-def parse_questionnaire_body(body: bytes, content_type: str) -> Any:
-    """Parse a JSON or YAML request body without executing YAML object constructors."""
+def _decode_body(body: bytes, content_type: str) -> tuple[str, str]:
+    """Validate size, media type, and encoding; return the media type and decoded text."""
     if len(body) > MAX_BODY_BYTES:
-        raise ParseError("Request body exceeds 65,536 bytes", status=413, code="payload_too_large")
+        raise ParseError(
+            f"Request body exceeds {MAX_BODY_BYTES:,} bytes", status=413, code="payload_too_large"
+        )
     media_type, charset = _media_type(content_type)
     if media_type not in {"application/json", "application/yaml"}:
         raise ParseError(
@@ -90,10 +95,21 @@ def parse_questionnaire_body(body: bytes, content_type: str) -> Any:
         raise ParseError("Request body must be valid UTF-8") from exc
     if not text.strip():
         raise ParseError("Request body must not be empty")
+    return media_type, text
 
+
+def parse_questionnaire_body(body: bytes, content_type: str) -> Any:
+    """Parse a JSON or YAML request body without executing YAML object constructors."""
+    media_type, text = _decode_body(body, content_type)
     try:
         if media_type == "application/json":
             return json.loads(text, object_pairs_hook=_json_object)
-        return yaml.load(text, Loader=_UniqueKeySafeLoader)
+        # _UniqueKeySafeLoader subclasses yaml.SafeLoader; it only adds duplicate-key checks.
+        return yaml.load(text, Loader=_UniqueKeySafeLoader)  # noqa: S506
     except (json.JSONDecodeError, yaml.YAMLError, ValueError) as exc:
         raise ParseError(f"Malformed {media_type.split('/')[-1]} request body: {exc}") from exc
+    except RecursionError:
+        # The thousand-frame parser traceback is noise; nesting depth is the only cause.
+        raise ParseError(
+            f"Malformed {media_type.split('/')[-1]} request body: nesting is too deep"
+        ) from None

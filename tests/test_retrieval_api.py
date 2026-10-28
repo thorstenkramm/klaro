@@ -4,6 +4,7 @@ import pytest
 
 from tests.app_helpers import RECIPIENT, make_app, post_creation
 from tests.helpers import FakeClock
+from tests.response_helpers import expected_answers, expected_full
 
 
 def create_token(client) -> str:
@@ -13,11 +14,11 @@ def create_token(client) -> str:
 
 
 def answer(client, token: str) -> None:
-    response = client.post(f"/{token}", data={"q1": "beer", "q2": ["rice", "salad"]})
+    response = client.post(f"/{token}", data={"q1": "1", "q2": ["1", "2"]})
     assert response.status_code == 200
 
 
-def test_full_json_before_answering_has_stable_ids_and_null_answers(
+def test_full_json_before_answering_has_ordered_questions_and_null_answers(
     tmp_path, fake_clock: FakeClock
 ) -> None:
     app, _ = make_app(tmp_path, fake_clock)
@@ -29,20 +30,7 @@ def test_full_json_before_answering_has_stable_ids_and_null_answers(
 
     assert first.status_code == second.status_code == 200
     assert first.json == second.json
-    assert first.json == {
-        "status": "awaiting_answer",
-        "expires_at": "2026-10-25T12:01:00Z",
-        "questions": [
-            {"id": "q1", "name": "Drink?", "type": "radio", "answers": ["beer", "water"]},
-            {
-                "id": "q2",
-                "name": "Sides?",
-                "type": "checkbox",
-                "answers": ["rice", "salad"],
-            },
-        ],
-        "answers": None,
-    }
+    assert first.json == expected_full()
     assert app.extensions["klaro"].store.read(token).status == "awaiting_answer"
 
 
@@ -52,6 +40,7 @@ def test_full_json_after_answering_is_complete_and_non_destructive(
     app, _ = make_app(tmp_path, fake_clock)
     client = app.test_client()
     token = create_token(client)
+    fake_clock.advance(5)
     answer(client, token)
 
     first = client.get(f"/{token}", headers={"Accept": "application/json"})
@@ -59,8 +48,7 @@ def test_full_json_after_answering_is_complete_and_non_destructive(
 
     assert first.status_code == second.status_code == 200
     assert first.json == second.json
-    assert first.json["status"] == "answered"
-    assert first.json["answers"] == {"q1": ["beer"], "q2": ["rice", "salad"]}
+    assert first.json == expected_full("2026-10-25T12:00:05Z", ["beer"], ["rice", "salad"])
     assert len(first.json["questions"]) == 2
     assert app.extensions["klaro"].store.read(token).status == "answered"
 
@@ -78,30 +66,20 @@ def test_answer_only_before_and_after_submission_is_repeatable(
     after = client.get(f"/{token}?answer_only=1")
     after_again = client.get(f"/{token}?answer_only=1")
 
-    assert (
-        before.json
-        == before_again.json
-        == {
-            "status": "awaiting_answer",
-            "answers": None,
-        }
-    )
+    assert before.json == before_again.json == expected_answers()
     assert (
         after.json
         == after_again.json
-        == {
-            "status": "answered",
-            "answers": {"q1": ["beer"], "q2": ["rice", "salad"]},
-        }
+        == expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"])
     )
     for response in [before, before_again, after, after_again]:
-        assert set(response.json) == {"status", "answers"}
+        assert set(response.json) == {"answered_at", "questions"}
         assert response.mimetype == "application/json"
     assert app.extensions["klaro"].store.read(token) is not None
 
 
 @pytest.mark.parametrize(
-    "accept,expected_mimetype",
+    ("accept", "expected_mimetype"),
     [
         ("application/json", "application/json"),
         ("application/json, text/html;q=0.5", "application/json"),
@@ -133,7 +111,7 @@ def test_answer_only_overrides_html_negotiation(tmp_path, fake_clock: FakeClock)
     response = client.get(f"/{token}?answer_only=1", headers={"Accept": "text/html"})
 
     assert response.mimetype == "application/json"
-    assert set(response.json) == {"status", "answers"}
+    assert set(response.json) == {"answered_at", "questions"}
 
 
 def test_pending_token_has_same_generic_404_as_unknown(tmp_path, fake_clock: FakeClock) -> None:

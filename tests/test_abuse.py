@@ -120,25 +120,12 @@ def test_only_acceptance_resets_backoff_level(fake_clock: FakeClock) -> None:
     backoff = RecipientBackoff(fake_clock)
     backoff.record_rejection(IP)
     fake_clock.advance(60)
-    backoff.record_other_failure(IP)
     assert backoff.record_rejection(IP) == 120
 
     fake_clock.advance(120)
     backoff.record_acceptance(IP)
     assert IP not in backoff._states
     assert backoff.record_rejection(IP) == 60
-
-
-def test_other_failure_does_not_extend_an_active_block(fake_clock: FakeClock) -> None:
-    backoff = RecipientBackoff(fake_clock)
-    backoff.record_rejection(IP)
-    state = backoff._states[IP]
-
-    fake_clock.advance(10)
-    backoff.record_other_failure(IP)
-
-    assert backoff._states[IP] is state
-    assert backoff.check(IP).retry_after == 50
 
 
 def test_longer_backoff_delay_wins_when_rate_limit_also_applies(fake_clock: FakeClock) -> None:

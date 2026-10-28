@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Request too large · Klaro{% endblock %}
+{% block content %}
+<section class="kl" aria-labelledby="request-too-large-title">
+  <div class="uk-container uk-container-xsmall kl-body">
+    <div class="kl-question">
+      <h1 id="request-too-large-title">This request is too large</h1>
+      <p>Answers are limited to {{ "{:,}".format(limit) }} bytes in total, including form encoding. Your answers were not stored.</p>
+      <p>Use your browser’s Back button to return to the form, shorten your text, and try again. The browser may not retain your entries.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

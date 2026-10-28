@@ -47,7 +47,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         "klaro.app:create_app()",
     ]
     try:
-        os.execv(sys.executable, command)
+        # Replaces this process with the packaged Gunicorn; arguments are fixed, not user input.
+        os.execv(sys.executable, command)  # noqa: S606
     except OSError as exc:
         parser.exit(1, f"klaro: could not start Gunicorn: {exc}\n")
 

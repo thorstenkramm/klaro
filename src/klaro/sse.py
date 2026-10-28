@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import Any
 
 from flask import Response
 
 from klaro.clock import Clock
-from klaro.storage import Questionnaire, format_time
+from klaro.records import Questionnaire, Status, format_time
 from klaro.subscribers import Subscription
 
 RETRY_FRAME = "retry: 5000\n\n"
@@ -21,34 +21,35 @@ def event_frame(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\n" + "".join(f"data: {line}\n" for line in lines) + "\n"
 
 
-def status_frame(record: Questionnaire) -> str:
+def status_frame(record: Questionnaire, url: str) -> str:
     return event_frame(
-        "status", {"status": record.status, "expires_at": format_time(record.expires_at)}
+        "status", {"answered_at": None, "expires_at": format_time(record.expires_at), "url": url}
     )
 
 
 def answer_frame(record: Questionnaire) -> str:
-    return event_frame("answer", {"status": "answered", "answers": record.answer_dict()})
+    return event_frame("answer", record.answer_only_dict())
 
 
 class SSEStream:
     """An iterator whose close always releases the locked registration."""
 
     def __init__(
-        self, subscription: Subscription, *, heartbeat_seconds: float, clock: Clock
+        self, subscription: Subscription, *, heartbeat_seconds: float, clock: Clock, url: str
     ) -> None:
         self.subscription = subscription
         self.heartbeat_seconds = heartbeat_seconds
         self.clock = clock
+        self.url = url
         self._frames = self._generate()
         self._closed = False
 
-    def _generate(self) -> Iterator[str]:
+    def _generate(self) -> Generator[str, None, None]:
         yield RETRY_FRAME
-        if self.subscription.initial.status == "answered":
+        if self.subscription.initial.status is Status.ANSWERED:
             yield answer_frame(self.subscription.initial)
             return
-        yield status_frame(self.subscription.initial)
+        yield status_frame(self.subscription.initial, self.url)
         while True:
             event, record = self.subscription.wait_for_change(self.heartbeat_seconds)
             if event == "answer":
@@ -57,7 +58,9 @@ class SSEStream:
                 yield answer_frame(record)
                 return
             if event == "expired":
-                yield event_frame("expired", {"status": "expired"})
+                yield event_frame(
+                    "expired", {"expires_at": format_time(self.subscription.expires_at)}
+                )
                 return
             yield event_frame("heartbeat", {"time": format_time(self.clock.wall())})
 
@@ -81,9 +84,11 @@ class SSEStream:
         self.subscription.close()
 
 
-def sse_response(subscription: Subscription, *, heartbeat_seconds: float, clock: Clock) -> Response:
+def sse_response(
+    subscription: Subscription, *, heartbeat_seconds: float, clock: Clock, url: str
+) -> Response:
     return Response(
-        SSEStream(subscription, heartbeat_seconds=heartbeat_seconds, clock=clock),
+        SSEStream(subscription, heartbeat_seconds=heartbeat_seconds, clock=clock, url=url),
         content_type="text/event-stream; charset=utf-8",
         headers={"X-Accel-Buffering": "no"},
     )

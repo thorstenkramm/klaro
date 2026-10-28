@@ -14,12 +14,13 @@ README = (Path(__file__).parent.parent / "README.md").read_text()
 
 def example(name: str, language: str) -> str:
     match = re.search(
-        rf"<!-- example:{re.escape(name)} -->\s*```{language}\n(.*?)```",
+        rf"<!-- example:{re.escape(name)} -->\s*(?P<fence>`{{3,}}){language}\n"
+        rf"(?P<body>.*?)(?P=fence)",
         README,
         re.DOTALL,
     )
     assert match is not None, f"Missing README example {name}"
-    return match.group(1).strip()
+    return match.group("body").strip()
 
 
 def here_document(script: str, marker: str) -> str:
@@ -37,7 +38,7 @@ def create(client, body: str, content_type: str):
 
 
 def answer(client, token: str) -> None:
-    response = client.post(f"/{token}", data={"q1": "beer", "q2": ["rice", "salad"]})
+    response = client.post(f"/{token}", data={"q1": "1", "q2": ["1", "2"]})
     assert response.status_code == 200
 
 

@@ -18,6 +18,7 @@ dependencies = [
   "gunicorn>=23,<27",
   "gevent>=24,<27",
   "packaging>=24,<27",
+  "markdown-it-py>=3.0,<5",
 ]
 
 [project.scripts]
@@ -25,10 +26,18 @@ klaro = "klaro.cli:main"
 
 [dependency-groups]
 dev = [
+  "axe-playwright-python>=0.1.4,<1",
   "beautifulsoup4>=4.13,<5",
+  "flake8>=7.4,<8",
+  "hypothesis>=6.100,<7",
+  "mutmut>=3.3,<4",
+  "mypy>=1.15,<2",
   "playwright>=1.50,<2",
   "pytest>=8,<10",
+  "pytest-cov>=6,<8",
   "ruff>=0.12,<1",
+  "types-PyYAML>=6,<7",
+  "types-requests>=2.32,<3",
 ]
 
 [tool.setuptools.packages.find]
@@ -41,6 +50,7 @@ klaro = [
   "static/vendor/uikit/*",
   "static/vendor/htmx/*",
   "static/klaro/*",
+  "licenses/*",
   "THIRD_PARTY_NOTICES.md",
 ]
 
@@ -48,9 +58,84 @@ klaro = [
 testpaths = ["tests"]
 addopts = "-ra"
 
+[tool.coverage.run]
+branch = true
+source = ["klaro"]
+
+[tool.coverage.report]
+fail_under = 94
+show_missing = true
+skip_covered = true
+
+[tool.mutmut]
+# Run once per release (or via the manual "mutation" CI job): uv run mutmut run
+# The whole package is copied; only answers, models, records, and markdown are mutated.
+paths_to_mutate = ["src/klaro/"]
+do_not_mutate = [
+  "src/klaro/__init__.py",
+  "src/klaro/abuse.py",
+  "src/klaro/app.py",
+  "src/klaro/cli.py",
+  "src/klaro/client_ip.py",
+  "src/klaro/clock.py",
+  "src/klaro/config.py",
+  "src/klaro/creation.py",
+  "src/klaro/filestore.py",
+  "src/klaro/gunicorn_conf.py",
+  "src/klaro/limits.py",
+  "src/klaro/logging_utils.py",
+  "src/klaro/parsing.py",
+  "src/klaro/pushover.py",
+  "src/klaro/responses.py",
+  "src/klaro/routes.py",
+  "src/klaro/runtime.py",
+  "src/klaro/scheduler.py",
+  "src/klaro/sse.py",
+  "src/klaro/subscribers.py",
+  "src/klaro/validation.py",
+]
+tests_dir = ["tests/"]
+also_copy = ["README.md", "LICENSE", "MANIFEST.in", "setup.py", "openspec/"]
+# Packaging, real-server, and browser tests cannot import mutated code and are slow.
+pytest_add_cli_args = [
+  "-p", "no:cacheprovider", "-x", "-q",
+  "--ignore=tests/test_distribution.py",
+  "--ignore=tests/test_production_smoke.py",
+  "--ignore=tests/test_operations_docs.py",
+  "--ignore=tests/test_readme_curl.py",
+  "--ignore=tests/test_accessibility.py",
+  "--ignore=tests/test_browser_forms.py",
+  "--ignore=tests/test_browser_swap_feedback.py",
+  "--ignore=tests/test_markdown_browser.py",
+  "--ignore=tests/test_recommendation_ui.py",
+]
+pytest_add_cli_args_test_selection = [
+  "tests/test_answers.py",
+  "tests/test_answer_rules.py",
+  "tests/test_models.py",
+  "tests/test_storage.py",
+  "tests/test_markdown.py",
+  "tests/test_markdown_linear.py",
+  "tests/test_properties.py",
+  "tests/test_review_contracts.py",
+  "tests/test_recommendations.py",
+  "tests/test_text_answers.py",
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src/klaro"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "PT", "RUF", "C4", "PERF", "RET", "TRY"]
+# Descriptive exception messages are this project's style.
+ignore = ["TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, start real servers and subprocesses, and use seeded randomness for fuzzing.
+"tests/*" = ["S101", "S311", "S603", "S606", "S607"]

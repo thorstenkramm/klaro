@@ -16,6 +16,7 @@ from tests.app_helpers import (
     pushover_response,
 )
 from tests.helpers import FakeClock
+from tests.response_helpers import expected_full
 
 
 def assert_error(response, status: int, code: str) -> None:
@@ -74,15 +75,7 @@ def test_yaml_creation_has_the_same_questionnaire_structure(
     retrieved = app.test_client().get(f"/{token}", headers={"Accept": "application/json"})
 
     assert created.status_code == 201
-    assert retrieved.json["questions"] == [
-        {"id": "q1", "name": "Drink?", "type": "radio", "answers": ["beer", "water"]},
-        {
-            "id": "q2",
-            "name": "Sides?",
-            "type": "checkbox",
-            "answers": ["rice", "salad"],
-        },
-    ]
+    assert retrieved.json == expected_full()
 
 
 @pytest.mark.parametrize("recipient", [None, "", "short", "a" * 31, "a" * 29 + "-", "a" * 29 + "ä"])
@@ -130,7 +123,7 @@ def test_missing_or_invalid_questioner_is_400_without_pushover(
 
 
 @pytest.mark.parametrize(
-    "body,content_type",
+    ("body", "content_type"),
     [
         (b"{", "application/json"),
         (b'{"questions": [], "questions": []}', "application/json"),
@@ -216,6 +209,17 @@ def test_allowlist_failure_is_403_without_pushover(tmp_path, fake_clock: FakeClo
     response = post_creation(app.test_client())
 
     assert_error(response, 403, "forbidden")
+    assert_no_creation_side_effects(app, transport)
+
+
+def test_duplicate_question_name_has_no_creation_side_effects(tmp_path, fake_clock) -> None:
+    app, transport = make_app(tmp_path, fake_clock)
+    question = {"name": "Drink?", "type": "radio", "answers": ["beer", "water"]}
+    response = post_creation(app.test_client(), body={"questions": [question, question]})
+    assert_error(response, 400, "invalid_request")
+    assert response.json["error"]["fields"] == {
+        "questions.1.name": ["Question names must be unique."]
+    }
     assert_no_creation_side_effects(app, transport)
 
 

@@ -80,7 +80,8 @@ public_address = "https://klaro.example.com"
 
 
 @pytest.mark.parametrize(
-    "section,field", [("pushover", "app_token"), ("klaro", "data_dir"), ("klaro", "public_address")]
+    ("section", "field"),
+    [("pushover", "app_token"), ("klaro", "data_dir"), ("klaro", "public_address")],
 )
 def test_mandatory_fields(tmp_path: Path, section: str, field: str) -> None:
     raw = raw_config(tmp_path)

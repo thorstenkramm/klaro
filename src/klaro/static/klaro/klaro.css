@@ -1,4 +1,8 @@
-/* Klaro answering page: a thin layer over UIkit 3. */
+/*
+ * Klaro answering page: a thin override layer over the compiled UIkit 3 CSS.
+ * Deliberately no Less/Sass theme build: every colour lives in the custom properties
+ * below (enforced by tests/test_assets.py), and selectors stay scoped to Klaro classes.
+ */
 :root {
   --kl-ink: #1c1917;
   --kl-ink-muted: #57534e;
@@ -7,10 +11,33 @@
   --kl-line-strong: #a8a29e;
   --kl-accent: #ea580c;
   --kl-accent-hover: #c2410c;
+  /* White text needs at least 4.5:1 contrast: #c2410c is 5.2:1, #9a3412 is 7.3:1. */
+  --kl-action: #c2410c;
+  --kl-action-hover: #9a3412;
   --kl-accent-soft: #fdba74;
   --kl-danger: #b42318;
   --kl-danger-bg: #fdeeee;
+  --kl-soft: #ffedd5;
+  --kl-field-bg: #fafaf9;
+  --kl-rec: #0f766e;
+  --kl-rec-tab: #0f766e;
+  --kl-rec-tab-active: #115e59;
+  --kl-inline-code-bg: #f1efec;
+  --kl-inline-code-ink: #9a3412;
+  --kl-code-bg: #1c1917;
+  --kl-code-ink: #f5f5f4;
   --kl-radius: 14px;
+  --kl-on-dark: #fff;
+  --kl-on-dark-muted: #d6d3d1;
+  --kl-surface: #fff;
+  --kl-line-hover: #d6d3d1;
+  --kl-deadline-bg: rgba(251, 146, 60, 0.16);
+  --kl-progress-track: rgba(255, 255, 255, 0.18);
+  --kl-progress-value: #fb923c;
+  --kl-danger-strong: #9f1d1d;
+  --kl-danger-line: #e7a3a0;
+  --kl-accent-glow: rgba(234, 88, 12, 0.45);
+  --kl-accent-ink: #9a3412;
 }
 
 html {
@@ -26,10 +53,28 @@ html {
   color: var(--kl-ink);
 }
 
+.kl em {
+  color: inherit;
+}
+
+.kl :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: var(--kl-inline-code-bg);
+  color: var(--kl-inline-code-ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.kl .uk-legend :not(pre) > code {
+  font-size: 0.8em;
+}
+
 /* Header band */
 .kl-head {
   background: var(--kl-ink);
-  color: #fff;
+  color: var(--kl-on-dark);
   padding: 24px 0 28px;
   border-radius: 0 0 24px 24px;
 }
@@ -44,7 +89,7 @@ html {
 
 .kl .kl-head__title {
   margin: 0;
-  color: #fff;
+  color: var(--kl-on-dark);
   font-size: 17px;
   font-weight: 600;
   line-height: 1.35;
@@ -52,7 +97,7 @@ html {
 
 .kl-head__from {
   display: block;
-  color: #d6d3d1;
+  color: var(--kl-on-dark-muted);
   font-size: 13px;
   font-weight: 400;
 }
@@ -63,7 +108,7 @@ html {
   gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(251, 146, 60, 0.16);
+  background: var(--kl-deadline-bg);
   color: var(--kl-accent-soft);
   font-size: 13px;
   font-weight: 600;
@@ -77,7 +122,7 @@ html {
   display: flex;
   justify-content: space-between;
   margin-bottom: 10px;
-  color: #d6d3d1;
+  color: var(--kl-on-dark-muted);
   font-size: 13px;
 }
 
@@ -85,16 +130,16 @@ html {
   height: 6px;
   margin: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--kl-progress-track);
 }
 
 .kl .uk-progress::-webkit-progress-value {
-  background: #fb923c;
+  background: var(--kl-progress-value);
   border-radius: 999px;
 }
 
 .kl .uk-progress::-moz-progress-bar {
-  background: #fb923c;
+  background: var(--kl-progress-value);
   border-radius: 999px;
 }
 
@@ -114,12 +159,12 @@ html {
   height: 52px;
   border-radius: 16px;
   background: var(--kl-accent);
-  color: #fff;
+  color: var(--kl-on-dark);
 }
 
 .kl .kl-success__title {
   margin: 0;
-  color: #fff;
+  color: var(--kl-on-dark);
   font-size: 24px;
   font-weight: 700;
   line-height: 1.2;
@@ -127,7 +172,7 @@ html {
 
 .kl-success__text {
   margin: 4px 0 0;
-  color: #d6d3d1;
+  color: var(--kl-on-dark-muted);
   font-size: 14px;
 }
 
@@ -144,7 +189,7 @@ html {
   padding: 14px 16px;
   border-radius: 12px;
   background: var(--kl-danger-bg);
-  color: #9f1d1d;
+  color: var(--kl-danger-strong);
 }
 
 .kl .kl-alert p {
@@ -152,15 +197,16 @@ html {
 }
 
 .kl-question {
+  min-width: 0;
   margin: 0 0 16px;
   padding: 20px 16px 16px;
   border: 1px solid var(--kl-line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--kl-surface);
 }
 
 .kl-question--error {
-  border-color: #e7a3a0;
+  border-color: var(--kl-danger-line);
 }
 
 .kl .kl-question .uk-legend {
@@ -181,21 +227,76 @@ html {
 }
 
 .kl-option {
+  position: relative;
+  min-height: 60px;
+  box-sizing: border-box;
+  border: 1px solid var(--kl-line);
+  border-radius: var(--kl-radius);
+  background: var(--kl-surface);
+  color: var(--kl-ink);
+  font-size: 17px;
+  line-height: 1.35;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.kl-option__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 60px;
+  min-height: 58px;
   padding: 14px 18px;
   box-sizing: border-box;
-  border: 1px solid var(--kl-line);
-  border-radius: var(--kl-radius);
-  background: #fff;
-  color: var(--kl-ink);
-  font-size: 17px;
-  line-height: 1.35;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.kl-option__head > span:not(.kl-recommended-tab) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kl-option__description {
+  min-width: 0;
+  padding: 0 14px 14px;
+  font-size: 15px;
+}
+
+.kl-option__description p,
+.kl-answer__option-description p,
+.kl-not-chosen__description p {
+  margin: 10px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.kl-option pre,
+.kl-answer pre,
+.kl-not-chosen pre {
+  max-width: 100%;
+  margin: 10px 0 0;
+  padding: 12px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: var(--kl-code-bg);
+  color: var(--kl-code-ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.kl-option pre:focus-visible,
+.kl-answer pre:focus-visible,
+.kl-not-chosen pre:focus-visible {
+  outline: 2px solid var(--kl-accent);
+  outline-offset: 2px;
+}
+
+.kl-option pre code,
+.kl-answer pre code,
+.kl-not-chosen pre code {
+  font: inherit;
 }
 
 .kl-option + .kl-option {
@@ -203,12 +304,7 @@ html {
 }
 
 .kl-option:hover {
-  border-color: #d6d3d1;
-}
-
-.kl-option:has(input:checked) {
-  border-color: var(--kl-accent);
-  box-shadow: 0 0 0 1px var(--kl-accent), 0 6px 16px -8px rgba(234, 88, 12, 0.45);
+  border-color: var(--kl-line-hover);
 }
 
 .kl .kl-option .uk-radio,
@@ -236,6 +332,89 @@ html {
   outline-offset: 2px;
 }
 
+.kl-option--recommended,
+.kl-option + .kl-option--recommended {
+  margin-top: 20px;
+  border: 1.5px solid var(--kl-rec);
+}
+
+/* Shared "Recommended" label: a tab on answer options, a badge in read-only answers. */
+.kl-recommended-tab,
+.kl-recommended-badge {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--kl-rec-tab);
+  color: var(--kl-on-dark);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.kl-recommended-tab {
+  position: absolute;
+  top: -11px;
+  left: 14px;
+  z-index: 1;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Declared after the recommended border so selection wins for every option. */
+.kl-option:has(input:checked),
+.kl-option--recommended:has(input:checked) {
+  border-color: var(--kl-accent);
+  box-shadow: 0 0 0 1px var(--kl-accent), 0 6px 16px -8px var(--kl-accent-glow);
+}
+
+.kl-option--recommended:has(input:checked) .kl-recommended-tab {
+  background: var(--kl-rec-tab-active);
+}
+
+.kl-recommendation-note {
+  margin: 16px 0 0;
+  color: var(--kl-ink-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.kl-recommended-badge {
+  display: inline-block;
+  margin-left: 8px;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
+}
+
+.kl-not-chosen-list:empty {
+  display: none;
+}
+
+.kl-not-chosen {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 14px;
+  border: 1.5px solid var(--kl-rec);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+
+.kl-not-chosen__content {
+  min-width: 0;
+  flex: 1;
+}
+
+.kl-not-chosen__state {
+  flex: none;
+  color: var(--kl-ink-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
 .kl .kl-error {
   margin: 12px 0 0;
   padding: 0;
@@ -245,13 +424,200 @@ html {
   font-weight: 600;
 }
 
+.kl-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.kl-other-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kl-other {
+  display: block;
+  padding: 0 14px 14px;
+}
+
+@supports selector(.kl-option:has(input:checked)) {
+  .kl-option .kl-other {
+    display: none;
+  }
+
+  .kl-option:has(input:checked) .kl-other,
+  .kl-option--show-other .kl-other {
+    display: block;
+  }
+}
+
+.kl-option--error {
+  border-color: var(--kl-danger);
+}
+
+.kl .kl-other textarea,
+.kl .kl-comment textarea {
+  min-height: 88px;
+  padding: 12px;
+  border-color: var(--kl-line-strong);
+  border-radius: 10px;
+  background: var(--kl-field-bg);
+  color: var(--kl-ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.kl .kl-other textarea[aria-invalid="true"],
+.kl .kl-comment textarea[aria-invalid="true"] {
+  border-color: var(--kl-danger);
+  background: var(--kl-danger-bg);
+}
+
+.kl-text-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  color: var(--kl-ink-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.kl-text-meta span:last-child {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.kl-counter--over {
+  color: var(--kl-danger);
+  font-weight: 700;
+}
+
+.kl-comment {
+  margin-top: 8px;
+  text-align: right;
+}
+
+.kl-comment > summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: 10px;
+  color: var(--kl-ink-muted);
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.kl-comment > summary::-webkit-details-marker {
+  display: none;
+}
+
+.kl-comment > summary::marker {
+  display: none;
+  content: "";
+}
+
+.kl-comment[open] > summary,
+.kl-comment > summary:hover {
+  background: var(--kl-soft);
+  color: var(--kl-accent-ink);
+}
+
+.kl-comment > summary:focus-visible {
+  outline: 2px solid var(--kl-accent);
+  outline-offset: 2px;
+}
+
+.kl-comment__icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.kl-comment--filled:not([open]) .kl-comment__icon::after {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--kl-surface);
+  border-radius: 50%;
+  background: var(--kl-accent);
+  content: "";
+}
+
+.kl-comment[open] .kl-comment__icon path:last-child {
+  d: path("M8.5 11.5h7");
+}
+
+.kl-comment__body {
+  margin-top: 8px;
+  text-align: left;
+}
+
+.kl-request-error[hidden] {
+  display: none;
+}
+
+.kl-other-answer {
+  margin-top: 10px;
+}
+
+.kl-other-tag {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--kl-soft);
+  color: var(--kl-accent-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kl-other-answer p,
+.kl-comment-answer p {
+  margin: 8px 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.kl-comment-answer {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--kl-ground);
+}
+
+.kl-comment-answer h4 {
+  margin: 0;
+  color: var(--kl-ink-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .kl-actions {
   padding-top: 16px;
 }
 
 .kl .kl-submit {
   border-radius: var(--kl-radius);
-  background: var(--kl-accent);
+  background: var(--kl-action);
   font-size: 16px;
   font-weight: 600;
   line-height: 54px;
@@ -261,7 +627,7 @@ html {
 
 .kl .kl-submit:hover,
 .kl .kl-submit:focus {
-  background: var(--kl-accent-hover);
+  background: var(--kl-action-hover);
 }
 
 .kl-note {
@@ -280,7 +646,7 @@ html {
   padding: 18px 18px 16px;
   border: 1px solid var(--kl-line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--kl-surface);
 }
 
 .kl .kl-answer__question {
@@ -300,6 +666,16 @@ html {
   gap: 10px;
   font-size: 16px;
   line-height: 1.4;
+}
+
+.kl-answer__option {
+  min-width: 0;
+  flex: 1;
+}
+
+.kl-answer__option-description,
+.kl-not-chosen__description {
+  min-width: 0;
 }
 
 .kl-answer__tick {

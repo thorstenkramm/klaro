@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from klaro.config import PushoverConfig
+from klaro.markdown import plain_name
 from klaro.models import Question
 
 PUSHOVER_MESSAGES_URL = "https://api.pushover.net/1/messages.json"
@@ -31,7 +32,7 @@ class PushoverRecipientRejected(PushoverError):
     http_status = 422
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PushoverAcceptance:
     request_id: str | None
 
@@ -66,7 +67,9 @@ class PushoverClient:
         url_title = self._truncate(f"Answer questionnaire from {displayed_questioner}", 100)
         prefix = f"Questioner: {displayed_questioner}\nFirst question: "
         suffix = f"\nTotal questions: {len(questions)}"
-        first_question = self._truncate(questions[0].name, 1024 - len(prefix) - len(suffix))
+        first_question = self._truncate(
+            plain_name(questions[0].name), 1024 - len(prefix) - len(suffix)
+        )
         message = f"{prefix}{first_question}{suffix}"
         return {
             "title": title,

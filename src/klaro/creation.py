@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from klaro.config import Config
+from klaro.filestore import FileStore
 from klaro.models import Question
 from klaro.pushover import PushoverAcceptance
-from klaro.storage import FileStore, Questionnaire
+from klaro.records import Questionnaire
 
 
 class Notifier(Protocol):
@@ -23,7 +24,7 @@ class Notifier(Protocol):
     ) -> PushoverAcceptance: ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CreationResult:
     record: Questionnaire
     url: str

@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import socket
 import subprocess
-import time
 from pathlib import Path
 
 import requests
 
+from klaro.filestore import FileStore
 from klaro.models import Question
-from klaro.storage import FileStore
+from tests.process_helpers import stop_process_group, wait_until_serving
 
 TOKEN = "p" * 43
 
@@ -63,19 +62,7 @@ sse_heartbeat_seconds = 1
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-            deadline = time.monotonic() + 20
-            while True:
-                if process.poll() is not None:
-                    raise AssertionError(f"Gunicorn exited early with {process.returncode}")
-                try:
-                    ready = requests.get(f"{base_url}/static/vendor/htmx/htmx.min.js", timeout=0.5)
-                    if ready.status_code == 200:
-                        break
-                except requests.RequestException:
-                    pass
-                if time.monotonic() >= deadline:
-                    raise AssertionError("Gunicorn did not start within 20 seconds")
-                time.sleep(0.1)
+            wait_until_serving(process, base_url)
 
             stream = requests.get(
                 f"{base_url}/{TOKEN}",
@@ -90,7 +77,8 @@ sse_heartbeat_seconds = 1
             assert next(lines) == ""
             assert next(lines) == "event: status"
             status = json.loads(next(lines)[6:])
-            assert status["status"] == "awaiting_answer"
+            assert status["answered_at"] is None
+            assert status["url"] == f"{base_url}/{TOKEN}"
             assert next(lines) == ""
 
             ordinary = requests.get(
@@ -98,7 +86,7 @@ sse_heartbeat_seconds = 1
             )
             static = requests.get(f"{base_url}/static/vendor/uikit/uikit.min.css", timeout=2)
             assert ordinary.status_code == 200
-            assert ordinary.json()["status"] == "awaiting_answer"
+            assert ordinary.json()["answered_at"] is None
             assert static.status_code == 200
 
             assert next(lines) == "event: heartbeat"
@@ -110,13 +98,7 @@ sse_heartbeat_seconds = 1
         finally:
             if stream is not None:
                 stream.close()
-            if process is not None and process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=5)
+            stop_process_group(process)
 
     logs = log_path.read_text()
     assert logs.count("Booting worker with pid") == 1

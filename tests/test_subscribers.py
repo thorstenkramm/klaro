@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 
 import pytest
 
+from klaro.answers import SubmittedAnswer
+from klaro.filestore import FileStore, QuestionnaireNotFound
 from klaro.models import Question
-from klaro.storage import FileStore, QuestionnaireNotFound
 from klaro.subscribers import SubscriberHub
 from tests.helpers import FakeClock
+from tests.response_helpers import selected_by_id
 
 QUESTION = Question(id="q1", name="Drink?", kind="radio", answers=("beer", "water"))
 
@@ -38,10 +39,18 @@ def test_answer_notification_reaches_waiting_subscriber(
     store, hub = setup_hub(tmp_path, fake_clock)
 
     with hub.register("s" * 43) as subscription:
+        waiting = threading.Event()
+        original_wait = subscription.entry.condition.wait
+
+        def observed_wait(timeout: float | None = None) -> bool:
+            waiting.set()
+            return original_wait(timeout)
+
+        subscription.entry.condition.wait = observed_wait
 
         def answer() -> None:
-            time.sleep(0.02)
-            store.submit_answers("s" * 43, {"q1": ["beer"]})
+            assert waiting.wait(timeout=2)
+            store.submit_answers("s" * 43, {"q1": SubmittedAnswer(("beer",))})
 
         thread = threading.Thread(target=answer)
         thread.start()
@@ -49,7 +58,7 @@ def test_answer_notification_reaches_waiting_subscriber(
         thread.join()
 
         assert event == "answer"
-        assert record.answer_dict() == {"q1": ["beer"]}
+        assert selected_by_id(record) == {"q1": ["beer"]}
 
 
 def test_expiry_notification_reaches_waiting_subscriber(
@@ -87,13 +96,13 @@ def test_already_answered_and_interrupted_reconnect_get_current_state(
     subscription = hub.register("s" * 43)
     subscription.close()
     subscription.close()
-    store.submit_answers("s" * 43, {"q1": ["water"]})
+    store.submit_answers("s" * 43, {"q1": SubmittedAnswer(("water",))})
 
     with hub.register("s" * 43) as reconnected:
         assert reconnected.initial.status == "answered"
         event, record = reconnected.snapshot()
         assert event == "answer"
-        assert record.answer_dict() == {"q1": ["water"]}
+        assert selected_by_id(record) == {"q1": ["water"]}
 
 
 def test_expired_questionnaire_cannot_register(tmp_path: Path, fake_clock: FakeClock) -> None:
@@ -117,7 +126,7 @@ def test_register_and_submit_race_never_loses_answer(tmp_path: Path, fake_clock:
 
         def submit(barrier=barrier, store=store, token=token) -> None:
             barrier.wait()
-            store.submit_answers(token, {"q1": ["beer"]})
+            store.submit_answers(token, {"q1": SubmittedAnswer(("beer",))})
 
         first = threading.Thread(target=register)
         second = threading.Thread(target=submit)
@@ -129,4 +138,4 @@ def test_register_and_submit_race_never_loses_answer(tmp_path: Path, fake_clock:
         with subscriptions[0] as subscription:
             event, record = subscription.snapshot()
             assert event == "answer"
-            assert record.answer_dict() == {"q1": ["beer"]}
+            assert selected_by_id(record) == {"q1": ["beer"]}

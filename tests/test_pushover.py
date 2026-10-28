@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
@@ -65,6 +64,45 @@ def test_notification_content_and_acceptance() -> None:
     assert "html" not in kwargs["data"]
 
 
+def test_inline_markdown_becomes_plain_text_without_changing_other_notification_fields() -> None:
+    adapter = client(Mock())
+    url = "https://klaro.example.com/" + "t" * 400
+    question = Question(
+        id="q1",
+        name=(
+            "Run **now** with *care* and `code`; "
+            "[link *literal*](https://example.com) <script>**literal**</script>"
+        ),
+        kind="radio",
+        answers=("a", "b"),
+    )
+    fields = adapter.notification_fields(
+        questioner="Dinner **mate**", questions=[question, QUESTION], url=url
+    )
+    assert fields["message"] == (
+        "Questioner: Dinner **mate**\n"
+        "First question: Run now with care and code; "
+        "[link *literal*](https://example.com) <script>**literal**</script>\n"
+        "Total questions: 2"
+    )
+    assert fields["title"] == "Questionnaire from Dinner **mate**"
+    assert fields["url"] == url
+    assert fields["sound"] == "magic"
+    assert fields["priority"] == 1
+    assert "html" not in fields
+
+
+def test_pushover_truncates_after_inline_conversion() -> None:
+    adapter = client(Mock())
+    question = Question(id="q1", name="**" + "n" * 1_100 + "**", kind="radio", answers=("a", "b"))
+    fields = adapter.notification_fields(
+        questioner="Dinner mate", questions=[question], url="https://example.com/" + "x" * 43
+    )
+    assert len(fields["message"]) <= 1024
+    assert "**" not in fields["message"]
+    assert fields["message"].endswith("Total questions: 1")
+
+
 def test_display_text_is_truncated_but_complete_url_is_preserved() -> None:
     adapter = client(Mock())
     url = "https://klaro.example.com/" + "t" * 400
@@ -93,7 +131,8 @@ def test_too_long_complete_url_is_rejected() -> None:
 
 
 @pytest.mark.parametrize(
-    "status_code,payload", [(500, {"status": 1}), (200, {"status": 0}), (200, {"status": True})]
+    ("status_code", "payload"),
+    [(500, {"status": 1}), (200, {"status": 0}), (200, {"status": True})],
 )
 def test_only_http_200_with_integer_status_one_is_accepted(status_code: int, payload: dict) -> None:
     transport = Mock(return_value=response(status_code, payload))
@@ -152,7 +191,7 @@ def test_structured_recipient_rejection_has_its_own_classification() -> None:
 
 
 @pytest.mark.parametrize(
-    "status_code,payload",
+    ("status_code", "payload"),
     [
         (400, {"status": 0, "token": "invalid", "errors": ["application token is invalid"]}),
         (429, {"status": 0, "errors": ["quota exceeded"]}),
@@ -190,23 +229,26 @@ def test_timeouts_and_connection_failures_are_not_retried(
 
 
 def test_outbound_transport_is_bounded_to_two_concurrent_calls() -> None:
-    guard = threading.Lock()
+    changed = threading.Condition()
+    release = threading.Event()
     active = 0
     maximum = 0
     calls = 0
 
     def transport(*args, **kwargs):
         nonlocal active, maximum, calls
-        with guard:
+        with changed:
             active += 1
             calls += 1
             maximum = max(maximum, active)
+            changed.notify_all()
         try:
-            time.sleep(0.02)
+            assert release.wait(timeout=5)
             return response()
         finally:
-            with guard:
+            with changed:
                 active -= 1
+                changed.notify_all()
 
     adapter = client(transport)
 
@@ -219,7 +261,14 @@ def test_outbound_transport_is_bounded_to_two_concurrent_calls() -> None:
         )
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(send, range(8)))
+        results = [pool.submit(send, index) for index in range(8)]
+        with changed:
+            # Two calls are blocked inside the transport; six more are queued behind them.
+            assert changed.wait_for(lambda: active == 2, timeout=5)
+            assert not changed.wait_for(lambda: active > 2, timeout=0.2)
+        release.set()
+        for result in results:
+            result.result(timeout=5)
 
     assert calls == 8
     assert maximum == 2

@@ -7,14 +7,27 @@ from flask import request
 
 from tests.app_helpers import IP, QUESTIONER, RECIPIENT, VALID_BODY, make_app, pushover_response
 from tests.helpers import FakeClock
+from tests.response_helpers import expected_answers
+from tests.test_sse import decode_frame
 
 QUESTIONS = [
-    {"id": "q1", "name": "Drink?", "type": "radio", "answers": ["beer", "water"]},
+    {
+        "id": "q1",
+        "name": "Drink?",
+        "type": "radio",
+        "answers": ["beer", "water"],
+        "allow_other": False,
+        "allow_comments": False,
+        "recommendations": [],
+    },
     {
         "id": "q2",
         "name": "Sides?",
         "type": "checkbox",
         "answers": ["rice", "salad"],
+        "allow_other": False,
+        "allow_comments": False,
+        "recommendations": [],
     },
 ]
 ANSWERS = {"q1": ["beer"], "q2": ["rice", "salad"]}
@@ -26,15 +39,24 @@ def next_text(stream) -> str:
 
 
 def expected_storage(token: str, status: str, request_id: str, answers=None) -> str:
+    stored_answers = (
+        None
+        if answers is None
+        else {
+            key: {"answered": value, "other": None, "comment": None}
+            for key, value in answers.items()
+        }
+    )
     return json.dumps(
         {
-            "version": 1,
+            "version": 4,
             "status": status,
             "created_at": "2026-10-25T12:00:00Z",
             "expires_at": "2026-10-25T12:01:00Z",
             "questioner": QUESTIONER,
             "questions": QUESTIONS,
-            "answers": answers,
+            "answers": stored_answers,
+            "answered_at": None if answers is None else "2026-10-25T12:00:00Z",
             "pushover_request": request_id,
         },
         ensure_ascii=False,
@@ -106,17 +128,18 @@ def test_json_sse_journey_has_exact_storage_and_no_answer_polling(
     )
     stream = iter(stream_response.response)
     assert next_text(stream) == "retry: 5000\n\n"
-    assert next_text(stream) == (
-        'event: status\ndata: {"status":"awaiting_answer","expires_at":"2026-10-25T12:01:00Z"}\n\n'
+    assert decode_frame(next_text(stream)) == (
+        "status",
+        {"answered_at": None, "expires_at": created.json["expires_at"], "url": created.json["url"]},
     )
 
-    answered = client.post(f"/{token}", data={"q1": "beer", "q2": ["rice", "salad"]})
+    answered = client.post(f"/{token}", data={"q1": "1", "q2": ["1", "2"]})
     assert answered.status_code == 200
     assert "Answer stored" in answered.text
     assert_stored(app, token, "answered", "json-request-id", ANSWERS)
-    assert next_text(stream) == (
-        "event: answer\n"
-        'data: {"status":"answered","answers":{"q1":["beer"],"q2":["rice","salad"]}}\n\n'
+    assert decode_frame(next_text(stream)) == (
+        "answer",
+        expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"]),
     )
     try:
         next(stream)
@@ -159,8 +182,8 @@ def test_yaml_polling_journey_is_exact_and_non_destructive(tmp_path, fake_clock:
 
     not_ready = client.get(f"/{token}?answer_only=1")
     assert not_ready.status_code == 200
-    assert not_ready.json == {"status": "awaiting_answer", "answers": None}
-    assert client.post(f"/{token}", data={"q1": "beer", "q2": ["rice", "salad"]}).status_code == 200
+    assert not_ready.json == expected_answers()
+    assert client.post(f"/{token}", data={"q1": "1", "q2": ["1", "2"]}).status_code == 200
     answered_storage = assert_stored(app, token, "answered", "yaml-request-id", ANSWERS)
 
     first = client.get(f"/{token}?answer_only=1")
@@ -169,10 +192,28 @@ def test_yaml_polling_journey_is_exact_and_non_destructive(tmp_path, fake_clock:
     after_second = (app.extensions["klaro"].store.directory / f"{token}.json").read_text()
 
     assert first.status_code == second.status_code == 200
-    assert first.json == second.json == {"status": "answered", "answers": ANSWERS}
+    assert (
+        first.json
+        == second.json
+        == expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"])
+    )
     assert first.get_data() == second.get_data()
     assert after_first == after_second == answered_storage
     assert transport.call_count == 1
+
+    fake_clock.advance(5)
+    restarted, _ = make_app(tmp_path, fake_clock)
+    client = restarted.test_client()
+    assert client.get(f"/{token}?answer_only=1").json == first.json
+    stream_response = client.get(
+        f"/{token}", headers={"Accept": "text/event-stream"}, buffered=False
+    )
+    stream = iter(stream_response.response)
+    assert next_text(stream) == "retry: 5000\n\n"
+    assert decode_frame(next_text(stream)) == ("answer", first.json)
+    assert list(stream) == []
+    stream_response.close()
+    assert_stored(restarted, token, "answered", "yaml-request-id", ANSWERS)
 
     assert_confirmation_and_generic_404(client, token)
     assert app.extensions["klaro"].store.read(token) is None

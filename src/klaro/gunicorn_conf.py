@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from klaro.config import load_config
 
 _config = load_config()
@@ -16,7 +18,7 @@ errorlog = "-"
 loglevel = "info"
 
 
-def post_worker_init(worker) -> None:
+def post_worker_init(worker: Any) -> None:
     """Start cleanup only in the initialized worker, never in the master."""
     worker.wsgi.extensions["klaro"].scheduler.start()
     worker.log.info("Klaro cleanup scheduler started")

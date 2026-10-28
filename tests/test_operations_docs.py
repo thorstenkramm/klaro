@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import os
 import re
 import stat
@@ -8,12 +9,13 @@ import tomllib
 from pathlib import Path
 from unittest.mock import Mock
 
+from klaro import limits
 from klaro.config import KlaroConfig, load_config
+from klaro.filestore import FileStore
 from klaro.models import Question
 from klaro.pushover import CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS
 from klaro.scheduler import CleanupScheduler
 from klaro.sse import RETRY_FRAME
-from klaro.storage import FileStore
 
 README = (Path(__file__).parent.parent / "README.md").read_text()
 OPERATIONS = [
@@ -139,3 +141,21 @@ def test_documented_timeouts_and_cleanup_values_match_implementation(tmp_path: P
         "dead link",
     ]:
         assert text in README
+
+
+def test_limits_and_scale_section_matches_the_configuration(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / "klaro.toml"
+    config.write_text(
+        f'[pushover]\napp_token = "{"a" * 30}"\n\n[klaro]\n'
+        f'data_dir = "{tmp_path / "data"}"\npublic_address = "https://klaro.example.com"\n'
+    )
+    monkeypatch.setenv("KLARO_CONFIG", str(config))
+    settings = importlib.import_module("klaro.gunicorn_conf")
+    section = README.split("## Limits and scale", 1)[1].split("\n## ", 1)[0]
+
+    assert settings.workers == 1
+    assert "`workers = 1`" in section
+    assert f"up to {settings.worker_connections} per worker" in section
+    assert f"every {CleanupScheduler(Mock()).interval_seconds:g} seconds" in section
+    assert f"{limits.MAX_BODY_BYTES:,} bytes" in section
+    assert f"{limits.MAX_ANSWER_BODY_BYTES:,} bytes" in section

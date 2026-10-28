@@ -9,7 +9,7 @@ def create_token(client) -> str:
 
 
 def answer(client, token: str) -> None:
-    response = client.post(f"/{token}", data={"q1": "beer", "q2": "rice"})
+    response = client.post(f"/{token}", data={"q1": "1", "q2": "1"})
     assert response.status_code == 200
 
 
@@ -58,7 +58,7 @@ def test_get_with_confirmed_parameter_never_mutates_active_or_answered_state(
 
     active = client.get(f"/{token}?confirmed=1", headers={"Accept": "application/json"})
     assert active.status_code == 200
-    assert active.json["status"] == "awaiting_answer"
+    assert active.json["answered_at"] is None
     assert app.extensions["klaro"].store.read(token).status == "awaiting_answer"
 
     answer(client, token)
@@ -66,7 +66,7 @@ def test_get_with_confirmed_parameter_never_mutates_active_or_answered_state(
         f"/{token}?confirmed=1&answer_only=1", headers={"Accept": "application/json"}
     )
     assert answered.status_code == 200
-    assert answered.json["status"] == "answered"
+    assert answered.json["answered_at"] == "2026-10-25T12:00:00Z"
     assert app.extensions["klaro"].store.read(token).status == "answered"
 
     assert client.post(f"/{token}?confirmed=1").status_code == 200

@@ -1,4 +1,4 @@
-<section id="questionnaire-response" class="kl" aria-live="polite">
+<section id="questionnaire-response" class="kl">
   <header class="kl-head">
     <div class="uk-container uk-container-xsmall">
       <div class="kl-head__top">
@@ -9,16 +9,23 @@
         </p>
       </div>
       {% if record.status == "answered" %}
-      <div class="kl-success" role="status">
+      <div class="kl-success">
         <span class="kl-success__icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
         <div>
-          <h2 class="kl-success__title">Answer stored</h2>
+          <h2 class="kl-success__title" id="answer-stored" tabindex="-1" data-kl-swap-focus>Answer stored</h2>
           <p class="kl-success__text">Thank you. Answering is closed, and these answers cannot be changed.</p>
         </div>
       </div>
       {% else %}
       {% set progress = namespace(answered=0) %}
-      {% for question in record.questions %}{% if selected.get(question.id) %}{% set progress.answered = progress.answered + 1 %}{% endif %}{% endfor %}
+      {% for question in record.questions %}
+        {% set values = selected.get(question.id, []) %}
+        {% set other_values = selected.get(question.id ~ "-other", []) %}
+        {% set complete = namespace(value=false) %}
+        {% for value in values %}{% if value != "other" %}{% set complete.value = true %}{% endif %}{% endfor %}
+        {% if "other" in values and other_values and other_values[0].strip() %}{% set complete.value = true %}{% endif %}
+        {% if complete.value %}{% set progress.answered = progress.answered + 1 %}{% endif %}
+      {% endfor %}
       <div class="kl-progress-block">
         <div class="kl-progress-label"><span>{{ record.questions | length }} {{ "question" if record.questions | length == 1 else "questions" }}</span><span data-kl-progress-count>{{ progress.answered }} of {{ record.questions | length }} answered</span></div>
         <progress class="uk-progress" value="{{ progress.answered }}" max="{{ record.questions | length }}" data-kl-progress aria-hidden="true"></progress>

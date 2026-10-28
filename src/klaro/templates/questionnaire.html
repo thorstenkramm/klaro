@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Questionnaire from {{ record.questioner }}{% endblock %}
 {% block content %}
+  {# Stays in place across HTMX swaps, so screen readers reliably announce updates. #}
+  <p class="kl-sr-only" role="status" aria-live="polite" data-kl-announcer></p>
   {% include "_questionnaire_fragment.html" %}
 {% endblock %}

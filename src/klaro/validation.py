@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from klaro.limits import MAX_QUESTIONER_CHARACTERS
 from klaro.models import SchemaValidationError
 
 _RECIPIENT_RE = re.compile(r"^[A-Za-z0-9]{30}$", re.ASCII)
@@ -30,8 +31,11 @@ def validate_questioner(value: Any) -> str:
         raise SchemaValidationError(
             "headers.X-Questioner", "Must contain at least one non-whitespace character."
         )
-    if len(value) > 100:
-        raise SchemaValidationError("headers.X-Questioner", "Must contain at most 100 characters.")
+    if len(value) > MAX_QUESTIONER_CHARACTERS:
+        raise SchemaValidationError(
+            "headers.X-Questioner",
+            f"Must contain at most {MAX_QUESTIONER_CHARACTERS} characters.",
+        )
     return value
 
 

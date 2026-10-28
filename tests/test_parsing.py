@@ -62,7 +62,7 @@ def test_exact_body_limit_can_be_parsed() -> None:
 
 @pytest.mark.parametrize("body", [b"", b" \n\t", b"\xff"])
 def test_empty_or_non_utf8_bodies(body: bytes) -> None:
-    with pytest.raises(ParseError, match="body|UTF-8"):
+    with pytest.raises(ParseError, match=r"body|UTF-8"):
         parse_questionnaire_body(body, "application/json")
 
 
@@ -72,7 +72,7 @@ def test_non_utf8_charset_is_rejected() -> None:
 
 
 @pytest.mark.parametrize(
-    "body,content_type",
+    ("body", "content_type"),
     [
         (b'{"questions": [], "questions": []}', "application/json"),
         (b"questions: []\nquestions: []\n", "application/yaml"),
@@ -81,7 +81,7 @@ def test_non_utf8_charset_is_rejected() -> None:
     ],
 )
 def test_duplicate_keys_are_rejected(body: bytes, content_type: str) -> None:
-    with pytest.raises(ParseError, match="[Dd]uplicate"):
+    with pytest.raises(ParseError, match=r"[Dd]uplicate"):
         parse_questionnaire_body(body, content_type)
 
 

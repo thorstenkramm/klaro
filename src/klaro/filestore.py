@@ -1,144 +1,71 @@
-"""Versioned questionnaire records and atomic filesystem persistence."""
+"""Atomic single-process filesystem persistence, per-token locking, and transitions."""
 
 from __future__ import annotations
 
 import json
 import logging
 import os
-import re
-import secrets
 import tempfile
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
+from klaro.answers import SubmittedAnswer
 from klaro.clock import Clock, SystemClock
+from klaro.config import DEFAULT_LIFETIME_SECONDS
 from klaro.models import Question
+from klaro.records import InvalidRecord, Questionnaire, Status, generate_token, is_token
 
-SCHEMA_VERSION = 1
-_TOKEN_PATH_RE = re.compile(r"^[A-Za-z0-9_-]{43}$", re.ASCII)
 LOGGER = logging.getLogger(__name__)
 
 
-def generate_token() -> str:
-    """Return a URL-safe token containing 256 bits of randomness."""
-    return secrets.token_urlsafe(32)
-
-
 class QuestionnaireNotFound(LookupError):
-    """The public token is unknown, pending, expired, or deleted."""
+    """The public token is unknown, pending, expired, deleted, or unreadable."""
 
 
 class QuestionnaireStateConflict(ValueError):
     """The requested transition is invalid for the current state."""
 
 
-def format_time(value: datetime) -> str:
-    if value.tzinfo is None:
-        raise ValueError("Questionnaire timestamps must be timezone-aware")
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+class UnreadableRecord(ValueError):
+    """A stored record cannot be parsed or violates the record schema."""
 
 
-def parse_time(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("Stored timestamps must include a timezone")
-    return parsed.astimezone(UTC)
-
-
-@dataclass(frozen=True)
-class Questionnaire:
-    token: str = field(repr=False)
-    status: str
-    created_at: datetime
-    expires_at: datetime
-    questioner: str
-    questions: tuple[Question, ...]
-    answers: dict[str, tuple[str, ...]] | None = None
-    pushover_request: str | None = None
-    version: int = SCHEMA_VERSION
-
-    def storage_dict(self) -> dict[str, Any]:
-        return {
-            "version": self.version,
-            "status": self.status,
-            "created_at": format_time(self.created_at),
-            "expires_at": format_time(self.expires_at),
-            "questioner": self.questioner,
-            "questions": [question.as_dict() for question in self.questions],
-            "answers": (
-                None
-                if self.answers is None
-                else {key: list(values) for key, values in self.answers.items()}
-            ),
-            "pushover_request": self.pushover_request,
-        }
-
-    def public_dict(self) -> dict[str, Any]:
-        return {
-            "status": self.status,
-            "expires_at": format_time(self.expires_at),
-            "questions": [question.as_dict() for question in self.questions],
-            "answers": self.answer_dict(),
-        }
-
-    def answer_dict(self) -> dict[str, list[str]] | None:
-        if self.answers is None:
-            return None
-        return {key: list(values) for key, values in self.answers.items()}
-
-    @classmethod
-    def from_storage(cls, token: str, raw: dict[str, Any]) -> Questionnaire:
-        if raw.get("version") != SCHEMA_VERSION:
-            raise ValueError("Unsupported questionnaire record version")
-        questions = tuple(
-            Question(
-                id=item["id"],
-                name=item["name"],
-                kind=item["type"],
-                answers=tuple(item["answers"]),
-            )
-            for item in raw["questions"]
-        )
-        answers_raw = raw.get("answers")
-        answers = (
-            None
-            if answers_raw is None
-            else {key: tuple(values) for key, values in answers_raw.items()}
-        )
-        return cls(
-            token=token,
-            status=raw["status"],
-            created_at=parse_time(raw["created_at"]),
-            expires_at=parse_time(raw["expires_at"]),
-            questioner=raw["questioner"],
-            questions=questions,
-            answers=answers,
-            pushover_request=raw.get("pushover_request"),
-            version=raw["version"],
-        )
+@dataclass(slots=True)
+class _TokenLock:
+    lock: threading.RLock = field(default_factory=threading.RLock)
+    holders: int = 0
 
 
 class FileStore:
-    """A single-process atomic JSON-file questionnaire store."""
+    """A single-process atomic JSON-file questionnaire store.
+
+    Unreadable records are never served (they behave like unknown tokens), are logged
+    once without their token, and are deleted once ``unreadable_retention_seconds``
+    have passed since their last modification. No valid record outlives that age, so
+    the retention guarantee also covers files that cannot be decoded.
+    """
 
     def __init__(
         self,
         data_dir: Path,
         token_factory: Callable[[], str] = generate_token,
         clock: Clock | None = None,
+        *,
+        unreadable_retention_seconds: int = DEFAULT_LIFETIME_SECONDS,
     ) -> None:
         self.data_dir = data_dir
         self.clock = clock or SystemClock()
         self.directory = data_dir / "questionnaires"
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.unreadable_retention = timedelta(seconds=unreadable_retention_seconds)
         self._token_factory = token_factory
-        self._locks: dict[str, threading.RLock] = {}
+        self._locks: dict[str, _TokenLock] = {}
         self._locks_guard = threading.Lock()
+        self._reported_unreadable: set[str] = set()
         self._transition_listeners: list[Callable[[str, str], None]] = []
         self.recover()
 
@@ -154,14 +81,14 @@ class FileStore:
                 LOGGER.exception("Questionnaire transition listener failed")
 
     def _path(self, token: str) -> Path | None:
-        if not _TOKEN_PATH_RE.fullmatch(token):
+        if not is_token(token):
             return None
         return self.directory / f"{token}.json"
 
     def create_pending(
         self,
         *,
-        questions: list[Question] | tuple[Question, ...],
+        questions: Sequence[Question],
         questioner: str,
         now: datetime | None = None,
         lifetime_seconds: int,
@@ -170,7 +97,7 @@ class FileStore:
         created_at = now or self.clock.wall()
         record = Questionnaire(
             token=self._token_factory(),
-            status="pending",
+            status=Status.PENDING,
             created_at=created_at,
             expires_at=created_at + timedelta(seconds=lifetime_seconds),
             questioner=questioner,
@@ -181,6 +108,7 @@ class FileStore:
         return record
 
     def read(self, token: str) -> Questionnaire | None:
+        """Return the stored record, ``None`` when absent, or raise ``UnreadableRecord``."""
         path = self._path(token)
         if path is None:
             return None
@@ -189,15 +117,62 @@ class FileStore:
                 raw = json.load(handle)
         except FileNotFoundError:
             return None
-        return Questionnaire.from_storage(token, raw)
+        except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError
+            raise UnreadableRecord(f"Invalid JSON ({type(exc).__name__})") from exc
+        try:
+            return Questionnaire.from_storage(token, raw)
+        except InvalidRecord as exc:
+            raise UnreadableRecord(str(exc)) from exc
+
+    def _load(self, token: str) -> Questionnaire | None:
+        """Read for request and maintenance paths, treating unreadable records as absent."""
+        try:
+            return self.read(token)
+        except UnreadableRecord as exc:
+            self._handle_unreadable(token, exc)
+            return None
+
+    def _handle_unreadable(self, token: str, error: UnreadableRecord) -> None:
+        path = self._path(token)
+        if path is None:
+            return
+        try:
+            modified = datetime.fromtimestamp(path.stat().st_mtime, UTC)
+        except FileNotFoundError:
+            return
+        if self.clock.wall() >= modified + self.unreadable_retention:
+            self.delete(token)
+            LOGGER.warning("Deleted an unreadable questionnaire record after its retention period")
+            return
+        if token not in self._reported_unreadable:
+            self._reported_unreadable.add(token)
+            LOGGER.warning(
+                "Ignoring an unreadable questionnaire record (%s); it will be deleted "
+                "%d seconds after its last modification",
+                error,
+                self.unreadable_retention.total_seconds(),
+            )
 
     @contextmanager
     def locked(self, token: str) -> Iterator[None]:
-        """Serialize every read-modify-write transition for one token."""
+        """Serialize every read-modify-write transition for one token.
+
+        Locks exist only while held or awaited, so arbitrary request paths cannot
+        accumulate worker memory.
+        """
         with self._locks_guard:
-            lock = self._locks.setdefault(token, threading.RLock())
-        with lock:
-            yield
+            entry = self._locks.get(token)
+            if entry is None:
+                entry = self._locks[token] = _TokenLock()
+            entry.holders += 1
+        try:
+            with entry.lock:
+                yield
+        finally:
+            with self._locks_guard:
+                entry.holders -= 1
+                if entry.holders == 0:
+                    del self._locks[token]
 
     def _is_expired(self, record: Questionnaire) -> bool:
         return self.clock.wall() >= record.expires_at
@@ -219,13 +194,10 @@ class FileStore:
         removed = {"pending": 0, "expired": 0}
         for token in list(self._stored_tokens()):
             with self.locked(token):
-                try:
-                    record = self.read(token)
-                except (ValueError, KeyError, json.JSONDecodeError):
-                    continue
+                record = self._load(token)
                 if record is None:
                     continue
-                if record.status == "pending":
+                if record.status is Status.PENDING:
                     self.delete(token)
                     removed["pending"] += 1
                 elif self._delete_if_expired(record):
@@ -236,35 +208,35 @@ class FileStore:
         removed = 0
         for token in list(self._stored_tokens()):
             with self.locked(token):
-                try:
-                    record = self.read(token)
-                except (ValueError, KeyError, json.JSONDecodeError):
-                    continue
+                record = self._load(token)
                 if record is not None and self._delete_if_expired(record):
                     removed += 1
         return removed
 
+    def _require_live(self, token: str) -> Questionnaire:
+        """Load a record under its lock, treating absent or expired records as not found."""
+        record = self._load(token)
+        if record is None or self._delete_if_expired(record):
+            raise QuestionnaireNotFound
+        return record
+
     def get_public(self, token: str) -> Questionnaire:
+        if not is_token(token):
+            raise QuestionnaireNotFound
         with self.locked(token):
-            record = self.read(token)
-            if record is None or record.status == "pending":
-                raise QuestionnaireNotFound
-            if self._delete_if_expired(record):
+            record = self._require_live(token)
+            if record.status is Status.PENDING:
                 raise QuestionnaireNotFound
             return record
 
     def publish(self, token: str, *, pushover_request: str | None = None) -> Questionnaire:
         with self.locked(token):
-            record = self.read(token)
-            if record is None:
-                raise QuestionnaireNotFound
-            if self._delete_if_expired(record):
-                raise QuestionnaireNotFound
-            if record.status != "pending":
+            record = self._require_live(token)
+            if record.status is not Status.PENDING:
                 raise QuestionnaireStateConflict("Only a pending questionnaire can be published")
             published = replace(
                 record,
-                status="awaiting_answer",
+                status=Status.AWAITING_ANSWER,
                 pushover_request=pushover_request or record.pushover_request,
             )
             self.write(published)
@@ -272,42 +244,35 @@ class FileStore:
 
     def discard_pending(self, token: str) -> None:
         with self.locked(token):
-            record = self.read(token)
-            if record is None:
+            record = self._load(token)
+            if record is None or self._delete_if_expired(record):
                 return
-            if self._delete_if_expired(record):
-                return
-            if record.status == "pending":
+            if record.status is Status.PENDING:
                 self.delete(token)
 
-    def submit_answers(
-        self, token: str, answers: dict[str, tuple[str, ...] | list[str]]
-    ) -> Questionnaire:
+    def submit_answers(self, token: str, answers: Mapping[str, SubmittedAnswer]) -> Questionnaire:
+        if not is_token(token):
+            raise QuestionnaireNotFound
         with self.locked(token):
-            record = self.read(token)
-            if record is None:
-                raise QuestionnaireNotFound
-            if self._delete_if_expired(record):
-                raise QuestionnaireNotFound
-            if record.status != "awaiting_answer":
+            record = self._require_live(token)
+            if record.status is not Status.AWAITING_ANSWER:
                 raise QuestionnaireStateConflict("Questionnaire is not accepting answers")
             submitted = replace(
                 record,
-                status="answered",
-                answers={key: tuple(values) for key, values in answers.items()},
+                status=Status.ANSWERED,
+                answers=dict(answers),
+                answered_at=self.clock.wall(),
             )
             self.write(submitted)
             self._notify_transition(token, "answered")
             return submitted
 
     def confirm(self, token: str) -> Questionnaire:
+        if not is_token(token):
+            raise QuestionnaireNotFound
         with self.locked(token):
-            record = self.read(token)
-            if record is None:
-                raise QuestionnaireNotFound
-            if self._delete_if_expired(record):
-                raise QuestionnaireNotFound
-            if record.status != "answered":
+            record = self._require_live(token)
+            if record.status is not Status.ANSWERED:
                 raise QuestionnaireStateConflict("Only an answered questionnaire can be confirmed")
             self.delete(token)
             return record
@@ -341,6 +306,7 @@ class FileStore:
         path = self._path(token)
         if path is None:
             return
+        self._reported_unreadable.discard(token)
         try:
             path.unlink()
         except FileNotFoundError:

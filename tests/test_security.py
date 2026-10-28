@@ -9,9 +9,16 @@ from tests.helpers import FakeClock
 
 
 def assert_security_headers(response) -> None:
-    assert response.headers["Cache-Control"] == "no-store"
+    # Unversioned assets revalidate; every questionnaire response is never stored.
+    static = response.request.path.startswith("/static/")
+    assert response.headers["Cache-Control"] == ("no-cache" if static else "no-store")
     assert response.headers["Referrer-Policy"] == "no-referrer"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Cross-Origin-Opener-Policy"] == "same-origin"
+    assert response.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+    permissions = response.headers["Permissions-Policy"]
+    for feature in ["camera=()", "microphone=()", "geolocation=()", "payment=()"]:
+        assert feature in permissions
     csp = response.headers["Content-Security-Policy"]
     for directive in [
         "default-src 'none'",
@@ -35,13 +42,26 @@ def test_security_headers_and_access_log_redaction_across_routes(
     first_token = post_creation(client).json["url"].rsplit("/", 1)[-1]
     second_token = post_creation(client).json["url"].rsplit("/", 1)[-1]
     stream = client.get(f"/{second_token}", headers={"Accept": "text/event-stream"}, buffered=False)
+    frames = iter(stream.response)
+    next(frames)
+    assert second_token.encode() in next(frames)
+    client.post(f"/{second_token}", data={"q1": "1", "q2": "2"})
+    answer_frame = next(frames)
+    assert second_token.encode() not in answer_frame
+    assert RECIPIENT.encode() not in answer_frame
+    assert b'"answered_at"' in answer_frame
+    for endpoint, headers in [
+        (f"/{second_token}", {"Accept": "application/json"}),
+        (f"/{second_token}?answer_only=1", {}),
+    ]:
+        assert second_token.encode() not in client.get(endpoint, headers=headers).data
     responses = [
         client.get(f"/{first_token}", headers={"Accept": "text/html"}),
         client.get(f"/{first_token}", headers={"Accept": "application/json"}),
         client.get(f"/{first_token}?answer_only=1"),
         client.get("/static/vendor/htmx/htmx.min.js"),
-        client.post(f"/{first_token}", data={"q1": "beer"}),
-        client.post(f"/{first_token}", data={"q1": "beer", "q2": "rice"}),
+        client.post(f"/{first_token}", data={"q1": "1"}),
+        client.post(f"/{first_token}", data={"q1": "1", "q2": "1"}),
         client.post(f"/{first_token}?confirmed=1"),
         client.get(f"/{first_token}"),
         stream,

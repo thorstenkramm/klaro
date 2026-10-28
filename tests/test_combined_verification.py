@@ -11,6 +11,7 @@ import pytest
 
 from tests.app_helpers import RECIPIENT, make_app, post_creation, pushover_response
 from tests.helpers import FakeClock
+from tests.response_helpers import selected_by_id
 
 RATE_IP = "192.0.2.50"
 BACKOFF_IP = "192.0.2.60"
@@ -85,7 +86,11 @@ def test_combined_restart_streams_expiry_controls_concurrency_and_logs(
     first_open = open_stream(restarted_client, first_token)
     first_stream, name, data = consume_initial(first_open)
     assert name == "status"
-    assert data == {"status": "awaiting_answer", "expires_at": "2026-10-25T12:01:00Z"}
+    assert data == {
+        "answered_at": None,
+        "expires_at": "2026-10-25T12:01:00Z",
+        "url": f"https://klaro.example.com/{first_token}",
+    }
     second_open = open_stream(restarted_client, first_token)
     second_stream, second_name, _ = consume_initial(second_open)
     assert second_name == "status"
@@ -105,23 +110,24 @@ def test_combined_restart_streams_expiry_controls_concurrency_and_logs(
         barrier.wait()
         response = client.post(
             f"/{first_token}",
-            data={"q1": choice, "q2": "rice" if choice == "beer" else "salad"},
+            data={"q1": choice, "q2": choice},
         )
         return response.status_code
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        statuses = list(pool.map(submit, ["beer", "water"]))
+        statuses = list(pool.map(submit, ["1", "2"]))
 
     assert sorted(statuses) == [200, 409]
     answered = restarted.extensions["klaro"].store.read(first_token)
-    assert answered.answer_dict() in (
+    assert selected_by_id(answered) in (
         {"q1": ["beer"], "q2": ["rice"]},
         {"q1": ["water"], "q2": ["salad"]},
     )
     for stream in (first_stream, second_stream):
         name, data = event(next_text(stream))
         assert name == "answer"
-        assert data == {"status": "answered", "answers": answered.answer_dict()}
+        assert data == answered.answer_only_dict()
+        assert data["answered_at"] == "2026-10-25T12:00:00Z"
         with pytest.raises(StopIteration):
             next(stream)
     first_open.close()
@@ -131,13 +137,14 @@ def test_combined_restart_streams_expiry_controls_concurrency_and_logs(
     final_client = final_app.test_client()
     final_record = final_app.extensions["klaro"].store.read(first_token)
     assert final_record.status == "answered"
-    assert final_record.answer_dict() == answered.answer_dict()
+    assert selected_by_id(final_record) == selected_by_id(answered)
+    assert final_record.answered_at == answered.answered_at
     assert final_record.expires_at == original.expires_at
 
     answered_stream_response = open_stream(final_client, first_token)
     answered_stream, name, data = consume_initial(answered_stream_response)
     assert name == "answer"
-    assert data == {"status": "answered", "answers": answered.answer_dict()}
+    assert data == answered.answer_only_dict()
     with pytest.raises(StopIteration):
         next(answered_stream)
 
@@ -147,7 +154,7 @@ def test_combined_restart_streams_expiry_controls_concurrency_and_logs(
     assert data["expires_at"] == "2026-10-25T12:01:00Z"
     fake_clock.advance(60)
     assert final_app.extensions["klaro"].store.cleanup_expired() == 2
-    assert event(next_text(expiring_stream)) == ("expired", {"status": "expired"})
+    assert event(next_text(expiring_stream)) == ("expired", {"expires_at": "2026-10-25T12:01:00Z"})
     with pytest.raises(StopIteration):
         next(expiring_stream)
     expiring_response.close()

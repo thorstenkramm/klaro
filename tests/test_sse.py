@@ -8,6 +8,7 @@ import pytest
 from klaro.sse import RETRY_FRAME, event_frame
 from tests.app_helpers import make_app, post_creation
 from tests.helpers import FakeClock
+from tests.response_helpers import expected_answers
 
 
 def create_token(client) -> str:
@@ -33,7 +34,7 @@ def decode_frame(frame: str) -> tuple[str, dict]:
 
 
 def answer(client, token: str) -> None:
-    response = client.post(f"/{token}", data={"q1": "beer", "q2": ["rice", "salad"]})
+    response = client.post(f"/{token}", data={"q1": "1", "q2": ["1", "2"]})
     assert response.status_code == 200
 
 
@@ -54,7 +55,9 @@ def test_active_stream_has_immediate_status_and_transport_headers(
     client = app.test_client()
     token = create_token(client)
 
-    response = open_stream(client, token)
+    response = client.get(
+        f"/{token}", headers={"Accept": "text/event-stream", "Host": "evil.example"}, buffered=False
+    )
     stream = iter(response.response)
 
     assert response.status_code == 200
@@ -64,7 +67,11 @@ def test_active_stream_has_immediate_status_and_transport_headers(
     assert next_frame(stream) == RETRY_FRAME == "retry: 5000\n\n"
     assert decode_frame(next_frame(stream)) == (
         "status",
-        {"status": "awaiting_answer", "expires_at": "2026-10-25T12:01:00Z"},
+        {
+            "answered_at": None,
+            "expires_at": "2026-10-25T12:01:00Z",
+            "url": f"https://klaro.example.com/{token}",
+        },
     )
     response.close()
 
@@ -93,7 +100,7 @@ def test_answer_arrives_on_open_stream_and_closes_without_polling(
 
     assert decode_frame(next_frame(stream)) == (
         "answer",
-        {"status": "answered", "answers": {"q1": ["beer"], "q2": ["rice", "salad"]}},
+        expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"]),
     )
     with pytest.raises(StopIteration):
         next_frame(stream)
@@ -115,7 +122,7 @@ def test_already_answered_stream_immediately_sends_answer_and_closes(
     assert next_frame(stream) == RETRY_FRAME
     assert decode_frame(next_frame(stream)) == (
         "answer",
-        {"status": "answered", "answers": {"q1": ["beer"], "q2": ["rice", "salad"]}},
+        expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"]),
     )
     with pytest.raises(StopIteration):
         next_frame(stream)
@@ -133,7 +140,7 @@ def test_expiry_is_terminal_and_later_connection_is_404(tmp_path, fake_clock: Fa
     fake_clock.advance(60)
     assert app.extensions["klaro"].store.cleanup_expired() == 1
 
-    assert decode_frame(next_frame(stream)) == ("expired", {"status": "expired"})
+    assert decode_frame(next_frame(stream)) == ("expired", {"expires_at": "2026-10-25T12:01:00Z"})
     with pytest.raises(StopIteration):
         next_frame(stream)
     later = open_stream(client, token)
@@ -177,13 +184,12 @@ def test_heartbeats_do_not_extend_retention(tmp_path, fake_clock: FakeClock) -> 
     assert decode_frame(next_frame(stream))[0] == "heartbeat"
     fake_clock.advance(30)
 
-    assert decode_frame(next_frame(stream)) == ("expired", {"status": "expired"})
+    assert decode_frame(next_frame(stream)) == ("expired", {"expires_at": "2026-10-25T12:01:00Z"})
     assert initial["expires_at"] == "2026-10-25T12:01:00Z"
 
 
-def test_interrupted_stream_reconnects_to_current_answer_without_replay(
-    tmp_path, fake_clock: FakeClock
-) -> None:
+def token_after_dropped_stream(tmp_path, fake_clock: FakeClock):
+    """Create a questionnaire, read its retry and status frames, then drop the stream."""
     app, _ = make_app(tmp_path, fake_clock, heartbeat_seconds=60)
     client = app.test_client()
     token = create_token(client)
@@ -192,8 +198,15 @@ def test_interrupted_stream_reconnects_to_current_answer_without_replay(
     next_frame(stream)
     next_frame(stream)
     first.close()
-    entry = app.extensions["klaro"].subscribers._entries[token]
-    assert entry.subscribers == 0
+    return app, client, token
+
+
+def test_interrupted_stream_reconnects_to_current_answer_without_replay(
+    tmp_path, fake_clock: FakeClock
+) -> None:
+    app, client, token = token_after_dropped_stream(tmp_path, fake_clock)
+    entries = app.extensions["klaro"].subscribers._entries
+    assert token not in entries
 
     answer(client, token)
     reconnected = open_stream(client, token)
@@ -202,25 +215,27 @@ def test_interrupted_stream_reconnects_to_current_answer_without_replay(
     assert next_frame(frames) == RETRY_FRAME
     event, data = decode_frame(next_frame(frames))
     assert event == "answer"
-    assert data["answers"] == {"q1": ["beer"], "q2": ["rice", "salad"]}
+    assert data == expected_answers("2026-10-25T12:00:00Z", ["beer"], ["rice", "salad"])
+    assert data == client.get(f"/{token}?answer_only=1").json
     with pytest.raises(StopIteration):
         next_frame(frames)
+    assert token not in entries
 
 
 def test_reconnect_while_still_active_sends_current_status(tmp_path, fake_clock: FakeClock) -> None:
-    app, _ = make_app(tmp_path, fake_clock, heartbeat_seconds=60)
-    client = app.test_client()
-    token = create_token(client)
-    first = open_stream(client, token)
-    stream = iter(first.response)
-    next_frame(stream)
-    next_frame(stream)
-    first.close()
+    _app, client, token = token_after_dropped_stream(tmp_path, fake_clock)
 
     reconnected = open_stream(client, token)
     frames = iter(reconnected.response)
     assert next_frame(frames) == RETRY_FRAME
-    assert decode_frame(next_frame(frames))[0] == "status"
+    assert decode_frame(next_frame(frames)) == (
+        "status",
+        {
+            "answered_at": None,
+            "expires_at": "2026-10-25T12:01:00Z",
+            "url": f"https://klaro.example.com/{token}",
+        },
+    )
     reconnected.close()
 
 

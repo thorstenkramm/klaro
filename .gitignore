@@ -221,3 +221,16 @@ __marimo__/
 
 ## tmoprary data
 /tmp/
+
+# mutmut working copy
+mutants/
+
+# JetBrains IDE project files
+.idea/
+
+# Node lint tooling
+node_modules/
+
+# Trivy local outputs
+trivy-results.sarif
+license-scan/

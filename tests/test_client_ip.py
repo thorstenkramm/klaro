@@ -24,7 +24,7 @@ def test_spoofed_forwarding_header_from_untrusted_peer_is_ignored(peer: str) -> 
 
 
 @pytest.mark.parametrize(
-    "peer,ranges,forwarded,expected",
+    ("peer", "ranges", "forwarded", "expected"),
     [
         ("127.0.0.1", ["127.0.0.1"], "198.51.100.24", "198.51.100.24"),
         ("10.2.3.4", ["10.0.0.0/8"], "198.51.100.25", "198.51.100.25"),
