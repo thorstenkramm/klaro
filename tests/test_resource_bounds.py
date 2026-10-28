@@ -69,7 +69,7 @@ def test_transition_without_listeners_allocates_no_stream_entry(
 
 
 @pytest.mark.parametrize("unit", ["[", "![", "[](", "<", "<a>", "\\[", "*_"])
-def test_worst_case_questionnaire_page_stays_within_cpu_budget(
+def test_worst_case_questionnaire_page_is_cached_after_the_first_view(
     tmp_path, fake_clock: FakeClock, unit: str
 ) -> None:
     for function in (markdown.render_option, markdown.render_name, markdown.plain_name):
@@ -97,7 +97,28 @@ def test_worst_case_questionnaire_page_stays_within_cpu_budget(
     repeated_view = time.perf_counter() - started
 
     assert first.status_code == 200
-    # Quadratic matching needed about 2.4 s for the "[" page; linear rendering
-    # needs about 0.1-0.4 s, and cached repeats need a few milliseconds.
-    assert first_view < 1.5
-    assert repeated_view < 0.25
+    # Absolute times depend on the machine; caching must make repeats far cheaper.
+    assert repeated_view < first_view / 5
+
+
+def best_time(function, source: str, repetitions: int = 7) -> float:
+    timings = []
+    for _ in range(repetitions):
+        started = time.perf_counter()
+        function(source)
+        timings.append(time.perf_counter() - started)
+    return min(timings)
+
+
+@pytest.mark.parametrize("unit", ["[", "![", "[](", "<", "<a>", "\\[", "*_", "**a"])
+def test_rendering_cost_grows_linearly_with_option_length(unit: str) -> None:
+    # Quadrupling the input costs about 4x when linear and about 16x when quadratic
+    # (the old bracket matching measured 13-16x). Markdown-it's own HTML handling
+    # reaches about 8x, so 10 separates the two independent of machine speed.
+    render = markdown.render_option.__wrapped__
+    short = "x " + unit * (limits.MAX_OPTION_CHARACTERS // 4 // len(unit) - 1)
+    long = "x " + unit * (limits.MAX_OPTION_CHARACTERS // len(unit) - 1)
+
+    growth = best_time(render, long) / best_time(render, short)
+
+    assert growth < 10, f"rendering grew {growth:.1f}x for a 4x longer {unit!r} option"
