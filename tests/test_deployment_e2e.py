@@ -205,8 +205,11 @@ def test_invalid_configuration_is_logged_and_limited(service) -> None:
         config.write_text('[pushover]\napp_token="invalid"\n[klaro]\n')
         command("systemctl", "reset-failed", "klaro")
         wait_for_start_limit()
-        result = command("systemctl", "show", "-p", "Result", "--value", "klaro").stdout
-        assert "start-limit-hit" in result
+        # systemd 255 retains Result=exit-code from the last failed process even
+        # after refusing the next automatic start. The journal event proves the
+        # limiter fired; ActiveState confirms that supervision has stopped.
+        state = command("systemctl", "show", "-p", "ActiveState", "--value", "klaro").stdout
+        assert state.strip() == "failed"
         journal = command("journalctl", "-u", "klaro", "--no-pager").stdout
         assert "pushover.app_token" in journal
         assert "a" * 30 not in journal
