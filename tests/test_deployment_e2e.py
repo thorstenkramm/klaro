@@ -204,9 +204,7 @@ def test_invalid_configuration_is_logged_and_limited(service) -> None:
     try:
         config.write_text('[pushover]\napp_token="invalid"\n[klaro]\n')
         command("systemctl", "reset-failed", "klaro")
-        # Subscribe to systemd completion instead of polling or sleeping through restarts.
-        for _ in range(6):
-            command("systemctl", "start", "--wait", "klaro", check=False)
+        wait_for_start_limit()
         result = command("systemctl", "show", "-p", "Result", "--value", "klaro").stdout
         assert "start-limit-hit" in result
         journal = command("journalctl", "-u", "klaro", "--no-pager").stdout
@@ -217,6 +215,34 @@ def test_invalid_configuration_is_logged_and_limited(service) -> None:
         command("systemctl", "reset-failed", "klaro")
         command("systemctl", "start", "klaro")
         ready()
+
+
+def wait_for_start_limit() -> None:
+    # Follow the actual rate-limit event, not the initial failed start job.
+    limited = threading.Event()
+    journal = subprocess.Popen(
+        ["journalctl", "-u", "klaro", "--follow", "--lines=0", "--output=cat"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+
+    def observe() -> None:
+        assert journal.stdout is not None
+        for line in journal.stdout:
+            if "Start request repeated too quickly" in line:
+                limited.set()
+
+    observer = threading.Thread(target=observe, daemon=True)
+    observer.start()
+    try:
+        command("systemctl", "start", "klaro", check=False)
+        assert limited.wait(timeout=90), command("journalctl", "-u", "klaro", "--no-pager").stdout
+    finally:
+        journal.terminate()
+        journal.wait(timeout=5)
+        observer.join(timeout=5)
+        if journal.stdout is not None:
+            journal.stdout.close()
 
 
 @pytest.fixture
