@@ -1,0 +1,58 @@
+name: Verify deployment archive
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        required: true
+        type: string
+      digest:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: release
+      - name: Verify archive digest
+        env:
+          EXPECTED_DIGEST: ${{ inputs.digest }}
+        run: |
+          archive=(release/*.tar.gz)
+          test "${#archive[@]}" -eq 1
+          printf '%s  %s\n' "$EXPECTED_DIGEST" "${archive[0]}" | sha256sum --check
+      - name: Install tools and exercise the actual archive
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          uv sync --locked
+          sudo install -m 755 "$(command -v uv)" /usr/local/bin/uv
+          archive=("$PWD"/release/*.tar.gz)
+          sudo env "PATH=$PATH" KLARO_DEPLOYMENT_E2E=1 \
+            KLARO_RELEASE_ARCHIVE="${archive[0]}" \
+            KLARO_RELEASE_VERSION="$RELEASE_VERSION" \
+            "$PWD/.venv/bin/python" -m pytest tests/test_deployment_e2e.py -v -s
+      - name: Scan installed runtime licences
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: rootfs
+          scan-ref: /var/lib/klaro/venv
+          trivy-config: trivy-license.yaml
+          version: v0.76.1

@@ -13,6 +13,12 @@ on:
         description: Run mutation testing on the core modules (slow; once per release)
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      mutation:
+        description: Run mutation testing on the core modules (slow; once per release)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,9 +46,9 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests tools
       - name: Format
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests tools
       - name: Flake8 (pycodestyle, pyflakes, mccabe; settings in .flake8)
         run: uv run flake8
       - name: Type check
@@ -171,6 +177,29 @@ jobs:
         run: uvx zizmor==1.31.1 --format github .github
       - name: Dependabot configuration schema
         run: uvx check-jsonschema==0.39.0 --builtin-schema vendor.dependabot .github/dependabot.yml
+
+  deployment:
+    name: Linux release, systemd, and Caddy deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install locked test dependencies
+        run: uv sync --locked
+      - name: Prepare and exercise a test archive
+        run: |
+          uv run python -m tools.build_release v0.1.0
+          sudo install -m 755 "$(command -v uv)" /usr/local/bin/uv
+          sudo env "PATH=$PATH" KLARO_DEPLOYMENT_E2E=1 \
+            KLARO_RELEASE_ARCHIVE="$PWD/release/klaro-0.1.0.tar.gz" \
+            KLARO_RELEASE_VERSION=0.1.0 \
+            "$PWD/.venv/bin/python" -m pytest tests/test_deployment_e2e.py -v -s
 
   mutation:
     name: Mutation testing (manual)

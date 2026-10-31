@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build and test without publishing (no v prefix)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - id: check
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref_name }}
+        run: uv run python -m tools.release_check "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Refuse existing releases and API failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.check.outputs.tag }}
+        run: |
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name' > tags.txt
+          if grep -Fxq -- "$RELEASE_TAG" tags.txt; then
+            echo "Release already exists" >&2
+            exit 1
+          fi
+
+  gates:
+    needs: verify
+    # actionlint 1.7.12 does not yet support $/ (rhysd/actionlint#711).
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+      security-events: write
+
+  prepare:
+    needs: [verify, gates]
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - id: build
+        env:
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          uv run python -m tools.build_release "$RELEASE_TAG"
+          digest=$(sha256sum release/*.tar.gz | cut -d ' ' -f 1)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: release/*.tar.gz
+          if-no-files-found: error
+
+  archive-gates:
+    needs: [verify, prepare]
+    # actionlint compatibility, as for the CI call above.
+    uses: ./.github/workflows/deployment.yml # zizmor: ignore[self-repository]
+    with:
+      artifact: release
+      digest: ${{ needs.prepare.outputs.digest }}
+      version: ${{ needs.verify.outputs.version }}
+
+  attest:
+    needs: [prepare, archive-gates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release
+      - name: Verify tested bytes
+        env:
+          EXPECTED_DIGEST: ${{ needs.prepare.outputs.digest }}
+        run: |
+          archive=(release/*.tar.gz)
+          test "${#archive[@]}" -eq 1
+          printf '%s  %s\n' "$EXPECTED_DIGEST" "${archive[0]}" | sha256sum --check
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-paths: release/*.tar.gz
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [verify, prepare, attest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: release
+      - name: Publish tested archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EXPECTED_DIGEST: ${{ needs.prepare.outputs.digest }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          archive=(release/*.tar.gz)
+          test "${#archive[@]}" -eq 1
+          printf '%s  %s\n' "$EXPECTED_DIGEST" "${archive[0]}" | sha256sum --check
+          gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name' > tags.txt
+          if grep -Fxq -- "$RELEASE_TAG" tags.txt; then
+            echo "Release already exists" >&2
+            exit 1
+          fi
+          arguments=(--draft --verify-tag --generate-notes)
+          if [[ "$PRERELEASE" == "true" ]]; then
+            arguments+=(--prerelease --latest=false)
+          else
+            arguments+=(--latest)
+          fi
+          gh release create "$RELEASE_TAG" "${archive[0]}" "${arguments[@]}"
+          gh release edit "$RELEASE_TAG" --draft=false
