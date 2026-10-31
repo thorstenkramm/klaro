@@ -126,6 +126,10 @@ def test_manual_cold_start_and_permissions(deployment: str, tmp_path: Path) -> N
             assert stat.S_IMODE(STATE.stat().st_mode) == 0o700
             assert APP.stat().st_uid == 0
         finally:
+            # su starts a separate session; terminating only the outer shell's process
+            # group can leave its Gunicorn serving while the systemd test starts.
+            command("pkill", "-TERM", "-u", "klaro", check=False)
+            process.wait(timeout=35)
             stop_process_group(process)
 
 
@@ -201,7 +205,8 @@ def test_invalid_configuration_is_logged_and_limited(service) -> None:
         config.write_text('[pushover]\napp_token="invalid"\n[klaro]\n')
         command("systemctl", "reset-failed", "klaro")
         # Subscribe to systemd completion instead of polling or sleeping through restarts.
-        command("systemctl", "start", "--wait", "klaro", check=False)
+        for _ in range(6):
+            command("systemctl", "start", "--wait", "klaro", check=False)
         result = command("systemctl", "show", "-p", "Result", "--value", "klaro").stdout
         assert "start-limit-hit" in result
         journal = command("journalctl", "-u", "klaro", "--no-pager").stdout
