@@ -1,5 +1,11 @@
+import tomllib
+from pathlib import Path
+
 import klaro
 
 
 def test_package_import() -> None:
-    assert klaro.__version__ == "0.1.0"
+    with (Path(__file__).parent.parent / "pyproject.toml").open("rb") as stream:
+        project = tomllib.load(stream)
+
+    assert klaro.__version__ == project["project"]["version"]

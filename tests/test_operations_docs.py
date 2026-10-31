@@ -5,7 +5,7 @@ import os
 import re
 import stat
 import subprocess
-import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -25,6 +25,10 @@ OPERATIONS = [
     "production",
     "backup",
     "rollback",
+    "release-install",
+    "release-run",
+    "systemd-service",
+    "release-tag",
 ]
 
 
@@ -38,15 +42,23 @@ def operation(name: str) -> str:
     return match.group(1).strip()
 
 
-def run_operations(*names: str, root: Path, cwd: Path) -> None:
+def run_operations(
+    *names: str,
+    root: Path,
+    cwd: Path,
+    extra_env: Mapping[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
     script = "\n".join(operation(name) for name in names)
     environment = os.environ.copy()
     environment["KLARO_ROOT"] = str(root)
-    subprocess.run(
+    if extra_env is not None:
+        environment.update(extra_env)
+    return subprocess.run(
         ["bash", "-euo", "pipefail", "-c", script],
         cwd=cwd,
         env=environment,
-        check=True,
+        check=check,
         capture_output=True,
         text=True,
     )
@@ -106,15 +118,13 @@ public_address = "https://klaro.example.com"
 
 def test_documented_start_command_and_wheel_match_verified_production_path() -> None:
     production = operation("production")
-    project = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())[
-        "project"
-    ]
-    wheel = f"klaro-{project['version']}-py3-none-any.whl"
+    environment = operation("environment")
 
     assert "uv build" in production
     assert 'uv venv "$KLARO_VENV"' in production
     assert 'uv pip install --python "$KLARO_VENV/bin/python" "$KLARO_WHEEL"' in production
-    assert f'KLARO_WHEEL="$PWD/dist/{wheel}"' in operation("environment")
+    assert 'KLARO_VERSION="${KLARO_VERSION:-$(python3 -c' in environment
+    assert 'KLARO_WHEEL="$PWD/dist/klaro-$KLARO_VERSION-py3-none-any.whl"' in environment
     assert '"$KLARO_VENV/bin/klaro" --config "$KLARO_CONFIG"' in production
     assert "uv run klaro --config ./klaro.toml" in README
     assert " --workers " not in production

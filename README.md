@@ -458,8 +458,8 @@ For a source checkout, install the locked development environment and run the sa
 ```shell
 uv sync --frozen
 uv run playwright install chromium
-uv run ruff check src tests
-uv run ruff format --check src tests
+uv run ruff check src tests tools
+uv run ruff format --check src tests tools
 uv run flake8
 uv run mypy
 uv run pytest --cov
@@ -478,6 +478,67 @@ lockfiles and the SHA-pinned actions.
 
 `uvx pre-commit install` enables the fast subset (Ruff, flake8, and strict mypy) before every commit.
 
+### Cut a release
+
+Set `KLARO_VERSION` to the desired version, then create and push the release tag:
+
+<!-- operation:release-tag -->
+
+```shell
+git tag -a "v$KLARO_VERSION" -m "Klaro $KLARO_VERSION"
+git push origin "v$KLARO_VERSION"
+```
+
+GitHub Actions derives the package version from the tag, runs the checks, and publishes one deployment archive.
+
+### Install a release
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) system-wide at `/usr/local/bin/uv` first.
+Run these initial installation commands as root:
+
+<!-- operation:release-install -->
+
+```shell
+set -eu
+cd "$(mktemp -d)"
+useradd -s /usr/sbin/nologin -r -M -d /var/lib/klaro klaro
+curl -fL -o klaro.tar.gz \
+  "https://github.com/thorstenkramm/klaro/releases/download/v0.1.0/klaro-0.1.0.tar.gz"
+install -d -m 0755 -o root -g root /opt/klaro
+tar xzf klaro.tar.gz --no-same-owner -C /opt/klaro
+install -d -m 0750 -o root -g klaro /etc/klaro
+install -d -m 0700 -o klaro -g klaro /var/lib/klaro /var/lib/klaro/data
+install -m 0640 -o root -g klaro /opt/klaro/klaro.example.toml /etc/klaro/klaro.toml
+```
+
+Edit `/etc/klaro/klaro.toml` to set your Pushover application token and public URL, then start Klaro:
+
+<!-- operation:release-run -->
+
+```shell
+su -s /bin/sh -c '/opt/klaro/bin/klaro' klaro
+```
+
+The launcher automatically prepares Python 3.12 and locked runtime dependencies under `/var/lib/klaro`.
+First startup needs Internet access. Application files under `/opt/klaro` remain root-owned.
+
+### Run with systemd
+
+Stop the manually started instance first, then enable the bundled service:
+
+<!-- operation:systemd-service -->
+
+```shell
+ln -s /opt/klaro/klaro.service /etc/systemd/system/klaro.service
+systemctl daemon-reload
+systemctl enable --now klaro.service
+```
+
+Use `journalctl -u klaro` for logs and `systemctl restart klaro` after a configuration change. The service starts at
+boot through `multi-user.target`. Back up or restore `/var/lib/klaro/data` only while this single service is stopped.
+
+### Run a source checkout
+
 For production, choose a service-owned runtime root. The defaults below are suitable for an unprivileged local
 installation; a system service can instead use paths such as `/var/lib/klaro` and `/etc/klaro/klaro.toml`.
 
@@ -490,7 +551,8 @@ export KLARO_CONFIG="$KLARO_ROOT/klaro.toml"
 export KLARO_BACKUP="$KLARO_ROOT/backup"
 export KLARO_RESTORE="$KLARO_ROOT/restored-data"
 export KLARO_VENV="$KLARO_ROOT/venv"
-export KLARO_WHEEL="$PWD/dist/klaro-0.1.0-py3-none-any.whl"
+export KLARO_VERSION="${KLARO_VERSION:-$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')}"
+export KLARO_WHEEL="$PWD/dist/klaro-$KLARO_VERSION-py3-none-any.whl"
 ```
 
 Create the initial paths, then write the TOML configuration shown above to `$KLARO_CONFIG`:
@@ -529,6 +591,8 @@ not paths hard-coded into the application.
 
 ### Reverse proxy and SSE operation
 
+#### Nginx
+
 Terminate TLS at the proxy, forward to the configured `klaro.listen` address, and use the proxy sanitization rules
 above. Disable response buffering and caching for SSE. For Nginx with the default 15-second heartbeat, a suitable
 location block is:
@@ -545,6 +609,27 @@ location / {
     proxy_cache off;
     proxy_read_timeout 75s;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+}
+```
+
+#### Caddy
+
+The shipped [`deploy/caddy/Caddyfile`](deploy/caddy/Caddyfile) is a complete site example. Set `KLARO_SITE` to the
+public host name and run `caddy run --config /path/to/Caddyfile`; Caddy obtains and renews its TLS certificate. With
+`trusted_proxies = ["127.0.0.1/32"]` in `[klaro]`, the explicit `header_up` replaces any client-supplied forwarding
+value with the direct peer address. `flush_interval -1` disables proxy buffering for SSE, and no compression is
+enabled. Caddy has no proxy read timeout by default, so the 15-second heartbeat keeps long-lived streams active.
+
+<!-- example:caddyfile -->
+
+```caddyfile
+{$KLARO_SITE:klaro.example.com} {
+	reverse_proxy 127.0.0.1:3344 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		flush_interval -1
+	}
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }
 ```
 

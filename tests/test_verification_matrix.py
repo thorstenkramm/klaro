@@ -8,9 +8,9 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 # Implemented but not yet archived changes, in implementation order. Every change is
 # archived, so the main specs alone define the expected scenarios.
-IMPLEMENTED_DELTAS: tuple[str, ...] = ()
+IMPLEMENTED_DELTAS: tuple[str, ...] = ("add-release-and-systemd-deployment",)
 CHANGES = ROOT / "openspec" / "changes"
-CAPABILITIES = ("questionnaires", "abuse-protection")
+CAPABILITIES = ("questionnaires", "abuse-protection", "releases", "linux-deployment")
 
 
 def verification_artifact() -> Path:
@@ -42,8 +42,13 @@ def effective_spec(capability: str, main: str) -> str:
     return "\n".join(f"### Requirement: {section}" for section in sections.values())
 
 
+def main_specification(capability: str) -> str:
+    path = ROOT / "openspec" / "specs" / capability / "spec.md"
+    return path.read_text() if path.is_file() else ""
+
+
 def specification_scenarios(capability: str) -> set[str]:
-    spec = (ROOT / "openspec" / "specs" / capability / "spec.md").read_text()
+    spec = main_specification(capability)
     return set(re.findall(r"^#### Scenario: (.+)$", effective_spec(capability, spec), re.MULTILINE))
 
 
@@ -105,7 +110,7 @@ def test_every_listed_delta_is_active_or_archived() -> None:
 
 def test_coverage_is_unchanged_after_simulated_spec_sync() -> None:
     for capability in CAPABILITIES:
-        main = (ROOT / "openspec" / "specs" / capability / "spec.md").read_text()
+        main = main_specification(capability)
         synchronized = effective_spec(capability, main)
         assert effective_spec(capability, synchronized) == synchronized
         assert set(re.findall(r"^#### Scenario: (.+)$", synchronized, re.MULTILINE)) == set(

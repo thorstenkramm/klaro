@@ -1,0 +1,8 @@
+{$KLARO_SITE:klaro.example.com} {
+	reverse_proxy 127.0.0.1:3344 {
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		flush_interval -1
+	}
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}

@@ -1,6 +1,6 @@
 # Current executable scenario coverage
 
-This table covers the main specifications in `openspec/specs/`. Every implemented change is archived and synchronized, so no deltas are applied. When a new change is implemented before it is archived, add it to `IMPLEMENTED_DELTAS` in `tests/test_verification_matrix.py`; the consistency tests then apply it and simulate synchronization in memory. Historical verification artifacts remain historical, and planning-only changes are excluded.
+This table covers the main specifications in `openspec/specs/` plus the implemented, not-yet-archived `add-release-and-systemd-deployment` delta. `IMPLEMENTED_DELTAS` in `tests/test_verification_matrix.py` applies that delta and simulates synchronization in memory; the two new capabilities have no main specification until archival. Historical verification artifacts remain historical, and planning-only changes are excluded.
 
 | Capability | Scenario | Executable tests |
 | --- | --- | --- |
@@ -119,3 +119,23 @@ This table covers the main specifications in `openspec/specs/`. Every implemente
 | questionnaires | Oversized API request receives JSON | `tests/test_review_contracts.py::test_only_the_browser_answer_form_receives_the_html_413_page` `tests/test_accessibility.py::test_request_too_large_page_has_no_wcag_violations` |
 | abuse-protection | Rotating IPv6 addresses share one allowance | `tests/test_abuse_grouping.py::test_rotating_addresses_within_one_ipv6_64_share_the_creation_quota` `tests/test_abuse_grouping.py::test_recipient_backoff_applies_to_the_whole_ipv6_64` `tests/test_abuse_grouping.py::test_route_quota_is_shared_by_one_ipv6_64` |
 | abuse-protection | Idle backoff state is forgotten | `tests/test_abuse_grouping.py::test_idle_backoff_state_expires_one_maximum_delay_after_the_block` `tests/test_abuse_grouping.py::test_rotating_rejected_clients_do_not_accumulate_backoff_state` `tests/test_readme_abuse.py::test_documented_client_grouping_and_backoff_expiry` |
+| releases | Tag determines installed version | `tests/test_release_bundle.py::test_bundle_layout_and_version_injection` `tests/test_release_bundle.py::test_bundle_installs_without_source_writes` |
+| releases | Invalid release tag | `tests/test_release_check.py::test_invalid_release_tags_are_rejected` |
+| releases | Complete archive layout | `tests/test_release_bundle.py::test_bundle_layout_and_version_injection` |
+| releases | Version injection preserves dependency pins | `tests/test_release_bundle.py::test_bundle_layout_and_version_injection` `tests/test_release_bundle.py::test_bundle_installs_without_source_writes` |
+| releases | Failing gate blocks publication | `tests/test_release_workflow.py::test_all_gates_block_publication_and_dry_run_never_publishes` |
+| releases | Exact archive is published | `tests/test_release_workflow.py::test_publish_uses_only_tested_archive_and_provenance` |
+| releases | Re-running a published tag | `tests/test_release_workflow.py::test_existing_release_and_api_errors_block_release` |
+| releases | Release candidate | `tests/test_release_check.py::test_cli_reports_release_candidate` `tests/test_release_workflow.py::test_publish_uses_only_tested_archive_and_provenance` |
+| releases | Maintainer triggers release | `tests/test_release_check.py::test_source_placeholder_and_documented_tag` |
+| linux-deployment | Install a release | `tests/test_deployment_e2e.py::test_manual_cold_start_and_permissions` |
+| linux-deployment | First startup without a prepared environment | `tests/test_deployment_e2e.py::test_manual_cold_start_and_permissions` `tests/test_release_bundle.py::test_bundle_installs_without_source_writes` |
+| linux-deployment | Restart uses prepared runtime | `tests/test_deployment_e2e.py::test_restart_preserves_records` |
+| linux-deployment | Service starts at boot | `tests/test_deployment_e2e.py::test_service_one_worker_and_enabled` |
+| linux-deployment | Invalid configuration | `tests/test_deployment_e2e.py::test_invalid_configuration_is_logged_and_limited` |
+| linux-deployment | Application and configuration are read-only | `tests/test_deployment_e2e.py::test_sandbox_and_unit_validation` |
+| linux-deployment | Unit passes validation | `tests/test_deployment_e2e.py::test_sandbox_and_unit_validation` |
+| linux-deployment | Client address through Caddy | `tests/test_deployment_e2e.py::test_caddy_replaces_forged_headers` |
+| linux-deployment | Answer stream through Caddy | `tests/test_deployment_e2e.py::test_caddy_streams_status_heartbeat_answer` |
+| linux-deployment | Example configuration is valid | `tests/test_deployment_e2e.py::test_caddy_streams_status_heartbeat_answer` |
+| linux-deployment | Reader follows the basic guide | `tests/test_deployment_files.py::test_installation_documents_fixed_version_and_restricted_files` |

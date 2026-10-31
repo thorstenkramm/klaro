@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "klaro"
-version = "0.1.0"
+version = "0.0.0.dev0"
 description = "Pushover questionnaires with structured answer back-channel"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -125,7 +125,7 @@ pytest_add_cli_args_test_selection = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src/klaro"]
+files = ["src/klaro", "tools"]
 
 [tool.ruff]
 target-version = "py311"

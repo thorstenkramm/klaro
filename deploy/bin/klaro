@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+umask 077
+PROJECT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+export UV_CACHE_DIR=/var/lib/klaro/cache
+export UV_PYTHON_INSTALL_DIR=/var/lib/klaro/python
+export UV_PYTHON_PREFERENCE=only-managed
+export PYTHONDONTWRITEBYTECODE=1
+unset VIRTUAL_ENV PYTHONPATH UV_PROJECT_ENVIRONMENT
+cd "$PROJECT"
+if [ ! -x /var/lib/klaro/venv/bin/python ]; then
+    /usr/local/bin/uv --no-config venv --python 3.12 /var/lib/klaro/venv
+fi
+/usr/local/bin/uv --no-config pip sync --require-hashes --only-binary :all: \
+    --python /var/lib/klaro/venv/bin/python "$PROJECT/requirements.txt"
+exec /var/lib/klaro/venv/bin/python -m klaro.cli --config /etc/klaro/klaro.toml

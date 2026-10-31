@@ -2,6 +2,10 @@ include README.md
 include LICENSE
 include pyproject.toml
 include uv.lock
+include deploy/systemd/klaro.service
+include deploy/bin/klaro
+include deploy/klaro.example.toml
+include deploy/caddy/Caddyfile
 include src/klaro/THIRD_PARTY_NOTICES.md
 recursive-include src/klaro/templates *.html
 recursive-include src/klaro/static *

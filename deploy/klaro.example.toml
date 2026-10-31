@@ -1,0 +1,8 @@
+[pushover]
+app_token = "REPLACE_WITH_YOUR_PUSHOVER_APP_TOKEN"
+
+[klaro]
+data_dir = "/var/lib/klaro/data"
+public_address = "https://klaro.example.com"
+listen = "127.0.0.1:3344"
+trusted_proxies = ["127.0.0.1/32"]

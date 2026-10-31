@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import tarfile
+import tomllib
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -20,6 +21,8 @@ def free_port() -> int:
 
 def test_distributions_install_and_start_outside_source_tree(tmp_path: Path) -> None:
     repository = Path(__file__).parent.parent
+    with (repository / "pyproject.toml").open("rb") as stream:
+        version = tomllib.load(stream)["project"]["version"]
     distribution = tmp_path / "dist"
     subprocess.run(
         ["uv", "build", "--out-dir", str(distribution)],
@@ -51,12 +54,16 @@ def test_distributions_install_and_start_outside_source_tree(tmp_path: Path) -> 
         assert required_wheel <= set(archive.namelist())
         assert archive.read("klaro/uv.lock") == (repository / "uv.lock").read_bytes()
 
-    prefix = "klaro-0.1.0"
+    prefix = source.name.removesuffix(".tar.gz")
     required_source = {
         f"{prefix}/uv.lock",
         f"{prefix}/pyproject.toml",
         f"{prefix}/README.md",
         f"{prefix}/LICENSE",
+        f"{prefix}/deploy/systemd/klaro.service",
+        f"{prefix}/deploy/bin/klaro",
+        f"{prefix}/deploy/klaro.example.toml",
+        f"{prefix}/deploy/caddy/Caddyfile",
         *{f"{prefix}/src/{name}" for name in required_wheel - {"klaro/uv.lock"}},
     }
     with tarfile.open(source, "r:gz") as archive:
@@ -83,6 +90,8 @@ from pathlib import Path
 from importlib.resources import files
 import klaro
 from klaro.models import Question
+
+assert klaro.__version__ == sys.argv[3]
 from klaro.filestore import FileStore
 from klaro.markdown import plain_name
 
@@ -104,7 +113,7 @@ store.publish(sys.argv[2])
 print(klaro.__file__)
 """
     seeded = subprocess.run(
-        [str(python), "-c", seed_script, str(tmp_path / "installed-data"), token],
+        [str(python), "-c", seed_script, str(tmp_path / "installed-data"), token, version],
         cwd=clean_working_directory,
         check=False,
         capture_output=True,
