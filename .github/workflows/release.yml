@@ -105,7 +105,7 @@ jobs:
           printf '%s  %s\n' "$EXPECTED_DIGEST" "${archive[0]}" | sha256sum --check
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-paths: release/*.tar.gz
+          subject-path: release/*.tar.gz
 
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')

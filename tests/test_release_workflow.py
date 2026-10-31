@@ -40,7 +40,7 @@ def test_publish_uses_only_tested_archive_and_provenance() -> None:
         assert "uv build" not in script
         assert "build_release" not in script
         assert not any("checkout@" in step.get("uses", "") for step in steps)
-    assert jobs["attest"]["steps"][-1]["with"]["subject-paths"] == "release/*.tar.gz"
+    assert jobs["attest"]["steps"][-1]["with"]["subject-path"] == "release/*.tar.gz"
     publish = jobs["publish"]["steps"][-1]["run"]
     assert 'gh release create "$RELEASE_TAG" "${archive[0]}"' in publish
     assert "--draft=false" in publish
